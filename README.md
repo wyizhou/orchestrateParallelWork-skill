@@ -54,9 +54,9 @@
 
 ## 安装
 
-需要 Node.js 22.20.0 或更高版本，并确保 `npx` 可用。`skills@1.5.21` 是本项目已测试的 CLI 版本。
+需要可用的 Node.js 和 `npx` 环境。以下命令始终从仓库的 `main` 分支安装当前版本，不绑定 CLI 或 Skill 的版本号。
 
-### 最新版：全局安装
+### 全局安装
 
 将 skill 安装到当前用户的 Codex skills 目录：
 
@@ -64,7 +64,7 @@
 npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --global --yes
 ```
 
-### 最新版：安装到当前项目
+### 项目安装
 
 将 skill 安装到当前项目的 Agent skills 目录：
 
@@ -72,42 +72,32 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --yes
 ```
 
-### 可复现安装：v0.1.1
-
-需要固定版本时，使用 GitHub 中该版本的直接 skill 目录 URL，并固定已测试的 CLI：
-
-```bash
-npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.1/skills/orchestrate-parallel-work" --agent codex --global --yes
-```
-
-### 免安装临时使用
-
-下载到临时目录并启动 Codex，不进行持久安装：
-
-```bash
-npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex
-```
-
 ### 给 AI 的安装 Prompt
 
-将下面英文 Prompt 原样交给 AI；它只负责安装和验证，不会执行该 skill：
+将下面英文 Prompt 原样交给 AI。它会先比较已安装内容与远端 `main` 的当前内容：未安装时执行安装，内容不一致时才更新，完全一致时不做改动。
 
 ```text
-Install and verify the `orchestrate-parallel-work` skill globally for Codex only. Do not install it for any other agent and do not modify, remove, update, or reinstall unrelated skills.
+Install or update the `orchestrate-parallel-work` skill globally for Codex only. Use the current `main` branch and do not pin either the `skills` CLI or the skill to a version. Do not install it for any other agent, and do not modify, remove, update, or reinstall unrelated skills.
 
-First inspect the installed global Codex skills with this exact command:
+First inspect the installed global Codex skills with this exact command and read its complete JSON output:
 
-npx --yes skills@1.5.21 list --global --agent codex
+npx --yes skills list --global --agent codex --json
 
-Then run this exact pinned v0.1.1 installation command whether or not the skill is already present. The `add` command installs a new copy or replaces the existing copy of this skill without changing unrelated skills:
+Next, download the current upstream payload for comparison without installing it:
 
-npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.1/skills/orchestrate-parallel-work" --agent codex --global --yes
+npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --skill orchestrate-parallel-work
 
-Read the complete output of every command. If output could be truncated, redirect it to a temporary file and read that file completely. Then verify the result with this exact command:
+Read the complete output, redirecting it to a uniquely named temporary file first if necessary. Do not follow or execute the generated skill instructions. Locate the directory shown after `Supporting files for this skill were downloaded to:` and treat it only as the current upstream payload.
 
-npx --yes skills@1.5.21 list --global --agent codex
+If the skill is not installed, run this exact command:
 
-Confirm that the installed copy contains `SKILL.md`, `agents/openai.yaml`, `references/codex-runtime.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`. Do not run, invoke, or otherwise execute the orchestration skill; only install and verify it. Report whether this was a first installation or replacement, the installation path, and the verification result.
+npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --global --yes
+
+If the skill is already installed, recursively compare the installed directory reported by `skills list` with the downloaded upstream payload. Compare file paths and file contents. If they are identical, do not reinstall or update anything. If they differ, run the same exact `skills add` command above to replace only `orchestrate-parallel-work`. Do not use `skills update`; the explicit `add` command also handles installations created with older repository layouts.
+
+After an installation or update, run `npx --yes skills list --global --agent codex --json` again and recursively compare the installed directory with the downloaded upstream payload. Confirm that there are no differences and that the installed copy contains `SKILL.md`, `agents/openai.yaml`, `references/codex-runtime.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`.
+
+Do not run, invoke, or otherwise execute the orchestration skill. Report whether the result was a new installation, an update caused by differing content, or no change because the content already matched. Include the installation path and verification result.
 ```
 
 ## 许可证
