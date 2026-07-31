@@ -45,8 +45,8 @@
 
 ## 文件
 
-- `SKILL.md`：完整的 skill 定义和执行规范。
-- `agents/openai.yaml`：Codex/OpenAI 界面元数据。
+- `skills/orchestrate-parallel-work/SKILL.md`：完整的 Skill 定义和执行规范。
+- `skills/orchestrate-parallel-work/agents/openai.yaml`：Codex/OpenAI 界面元数据。
 
 ## 支持范围
 
