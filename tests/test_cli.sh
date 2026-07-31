@@ -7,10 +7,10 @@ cd "$repo_root"
 skill="orchestrate-parallel-work"
 before_status="$(git status --porcelain)"
 
-list_output="$(npx --yes skills@1.5.21 add . --list)"
+list_output="$(npx --yes skills add . --list)"
 printf '%s\n' "$list_output" | grep -F 'orchestrate-parallel-work' >/dev/null
 
-use_output="$(npx --yes skills@1.5.21 use . --skill "$skill")"
+use_output="$(npx --yes skills use . --skill "$skill")"
 printf '%s\n' "$use_output" | grep -F 'orchestrate-parallel-work' >/dev/null
 
 support_dir="$(printf '%s\n' "$use_output" | sed -n '/Supporting files for this skill were downloaded to:/{n;p;}' | tr -d '\r')"
@@ -32,6 +32,17 @@ cleanup_migration_tmp() {
 }
 trap cleanup_migration_tmp EXIT
 
+fresh_project="$migration_tmp/fresh-project"
+fresh_target="$fresh_project/.agents/skills/$skill"
+git init -q "$fresh_project"
+
+(
+  cd "$fresh_project"
+  npx --yes skills add "$repo_root/skills/$skill" --agent codex --yes >/dev/null
+)
+
+diff -qr "$support_dir" "$fresh_target" >/dev/null
+
 migration_project="$migration_tmp/project"
 target_dir="$migration_project/.agents/skills/$skill"
 unrelated_dir="$migration_project/.agents/skills/unrelated-skill"
@@ -43,7 +54,7 @@ printf '%s\n' "unrelated payload that must survive" >"$unrelated_dir/keep.txt"
 
 (
   cd "$migration_project"
-  npx --yes skills@1.5.21 add "$repo_root/skills/$skill" --agent codex --yes >/dev/null
+  npx --yes skills add "$repo_root/skills/$skill" --agent codex --yes >/dev/null
 )
 
 [ ! -e "$target_dir/legacy-only.txt" ]
@@ -55,6 +66,7 @@ printf '%s\n' "unrelated payload that must survive" >"$unrelated_dir/keep.txt"
 [ ! -e "$target_dir/README.md" ]
 grep -F 'name: orchestrate-parallel-work' "$target_dir/SKILL.md" >/dev/null
 grep -Fx 'unrelated payload that must survive' "$unrelated_dir/keep.txt" >/dev/null
+diff -qr "$support_dir" "$target_dir" >/dev/null
 
 after_status="$(git status --porcelain)"
 [ "$before_status" = "$after_status" ]

@@ -17,11 +17,12 @@ OPENAI_FILE = SKILL_DIR / "agents" / "openai.yaml"
 LICENSE_FILE = SKILL_DIR / "LICENSE"
 CASES_FILE = ROOT / "tests" / "cases.json"
 STALE_LITERALS = ("gpt-5.6-luna", "light")
-PINNED_VERSION = "v0.1.1"
-PINNED_SKILL_URL = (
+MAIN_SKILL_URL = (
     "https://github.com/wyizhou/orchestrateParallelWork-skill/"
-    f"tree/{PINNED_VERSION}/skills/orchestrate-parallel-work"
+    "tree/main/skills/orchestrate-parallel-work"
 )
+GLOBAL_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex --global --yes'
+PROJECT_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex --yes'
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -90,23 +91,40 @@ def validate_openai(text: str, errors: list[str]) -> None:
 def validate_readme(text: str, errors: list[str]) -> None:
     if "目前仅支持 Codex" not in text:
         fail(errors, "README must state that only Codex is currently supported")
-    if text.count(PINNED_SKILL_URL) < 2:
-        fail(errors, f"README must use the pinned {PINNED_VERSION} skill URL in both install sections")
+    installation = re.search(r"^## 安装\n(.*?)^## 许可证\n", text, re.MULTILINE | re.DOTALL)
+    if not installation:
+        fail(errors, "README must contain installation and license sections")
+        return
+    installation_text = installation.group(1)
+    headings = re.findall(r"^### (.+)$", installation_text, re.MULTILINE)
+    expected_headings = ["全局安装", "项目安装", "给 AI 的安装 Prompt"]
+    if headings != expected_headings:
+        fail(errors, "README installation section must contain exactly the three supported installation entries")
+    if re.search(r"\bskills@\d", installation_text):
+        fail(errors, "README installation commands must not pin the skills CLI version")
+    if re.search(r"/tree/v\d", installation_text):
+        fail(errors, "README installation commands must not pin a skill release tag")
+    if installation_text.count(GLOBAL_ADD) != 2:
+        fail(errors, "README must use the exact unversioned global command once directly and once in the AI prompt")
+    if installation_text.count(PROJECT_ADD) != 1:
+        fail(errors, "README must contain the exact unversioned project installation command once")
     heading = "### 给 AI 的安装 Prompt"
-    if heading not in text:
+    if heading not in installation_text:
         fail(errors, "README must provide an AI installation prompt")
         return
-    prompt = text.split(heading, 1)[1]
-    pinned_add = (
-        f'npx --yes skills@1.5.21 add "{PINNED_SKILL_URL}" '
-        "--agent codex --global --yes"
+    prompt = installation_text.split(heading, 1)[1]
+    required_prompt_fragments = (
+        "npx --yes skills list --global --agent codex --json",
+        f'npx --yes skills use "{MAIN_SKILL_URL}" --skill orchestrate-parallel-work',
+        "If the skill is not installed",
+        "recursively compare the installed directory",
+        "If they are identical, do not reinstall or update anything",
+        "If they differ",
+        "Do not use `skills update`",
     )
-    if pinned_add not in prompt:
-        fail(errors, "README AI prompt must use the exact pinned global Codex add command")
-    if "npx --yes skills@1.5.21 list --global --agent codex" not in prompt:
-        fail(errors, "README AI prompt must verify the global Codex skill list")
-    if "update orchestrate-parallel-work" in prompt:
-        fail(errors, "README AI prompt must not use update across the legacy directory migration")
+    for fragment in required_prompt_fragments:
+        if fragment not in prompt:
+            fail(errors, f"README AI prompt is missing comparison/update requirement: {fragment}")
     for expected_path in (
         "SKILL.md",
         "agents/openai.yaml",
