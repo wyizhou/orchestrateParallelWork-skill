@@ -26,5 +26,35 @@ fi
 [ -f "$support_dir/references/validation.md" ]
 [ ! -e "$support_dir/README.md" ]
 
+migration_tmp="$(mktemp -d)"
+cleanup_migration_tmp() {
+  rm -rf -- "$migration_tmp"
+}
+trap cleanup_migration_tmp EXIT
+
+migration_project="$migration_tmp/project"
+target_dir="$migration_project/.agents/skills/$skill"
+unrelated_dir="$migration_project/.agents/skills/unrelated-skill"
+mkdir -p "$target_dir" "$unrelated_dir"
+git init -q "$migration_project"
+
+printf '%s\n' "legacy payload that must be replaced" >"$target_dir/legacy-only.txt"
+printf '%s\n' "unrelated payload that must survive" >"$unrelated_dir/keep.txt"
+
+(
+  cd "$migration_project"
+  npx --yes skills@1.5.21 add "$repo_root/skills/$skill" --agent codex --yes >/dev/null
+)
+
+[ ! -e "$target_dir/legacy-only.txt" ]
+[ -f "$target_dir/SKILL.md" ]
+[ -f "$target_dir/LICENSE" ]
+[ -f "$target_dir/agents/openai.yaml" ]
+[ -f "$target_dir/references/codex-runtime.md" ]
+[ -f "$target_dir/references/validation.md" ]
+[ ! -e "$target_dir/README.md" ]
+grep -F 'name: orchestrate-parallel-work' "$target_dir/SKILL.md" >/dev/null
+grep -Fx 'unrelated payload that must survive' "$unrelated_dir/keep.txt" >/dev/null
+
 after_status="$(git status --porcelain)"
 [ "$before_status" = "$after_status" ]

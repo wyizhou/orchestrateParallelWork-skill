@@ -72,12 +72,12 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --yes
 ```
 
-### 可复现安装：v0.1.0
+### 可复现安装：v0.1.1
 
 需要固定版本时，使用 GitHub 中该版本的直接 skill 目录 URL，并固定已测试的 CLI：
 
 ```bash
-npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.0/skills/orchestrate-parallel-work" --agent codex --global --yes
+npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.1/skills/orchestrate-parallel-work" --agent codex --global --yes
 ```
 
 ### 免安装临时使用
@@ -93,19 +93,21 @@ npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 将下面英文 Prompt 原样交给 AI；它只负责安装和验证，不会执行该 skill：
 
 ```text
-Install and verify the `orchestrate-parallel-work` skill globally for Codex only. Do not install it for any other agent and do not modify, remove, update, or reinstall unrelated skills. First inspect the installed global Codex skills. If `orchestrate-parallel-work` is already installed, do not delete it; use this non-destructive update command instead:
+Install and verify the `orchestrate-parallel-work` skill globally for Codex only. Do not install it for any other agent and do not modify, remove, update, or reinstall unrelated skills.
 
-npx --yes skills@1.5.21 update orchestrate-parallel-work --global --yes
+First inspect the installed global Codex skills with this exact command:
 
-If it is not already installed, run this exact pinned v0.1.0 installation command:
+npx --yes skills@1.5.21 list --global --agent codex
 
-npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.0/skills/orchestrate-parallel-work" --agent codex --global --yes
+Then run this exact pinned v0.1.1 installation command whether or not the skill is already present. The `add` command installs a new copy or replaces the existing copy of this skill without changing unrelated skills:
+
+npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.1/skills/orchestrate-parallel-work" --agent codex --global --yes
 
 Read the complete output of every command. If output could be truncated, redirect it to a temporary file and read that file completely. Then verify the result with this exact command:
 
 npx --yes skills@1.5.21 list --global --agent codex
 
-Do not run, invoke, or otherwise execute the orchestration skill; only install/update and verify it. Report the installation path and the verification result.
+Confirm that the installed copy contains `SKILL.md`, `agents/openai.yaml`, `references/codex-runtime.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`. Do not run, invoke, or otherwise execute the orchestration skill; only install and verify it. Report whether this was a first installation or replacement, the installation path, and the verification result.
 ```
 
 ## 许可证

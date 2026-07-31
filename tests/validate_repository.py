@@ -10,12 +10,18 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+README_FILE = ROOT / "README.md"
 SKILL_DIR = ROOT / "skills" / "orchestrate-parallel-work"
 SKILL_FILE = SKILL_DIR / "SKILL.md"
 OPENAI_FILE = SKILL_DIR / "agents" / "openai.yaml"
 LICENSE_FILE = SKILL_DIR / "LICENSE"
 CASES_FILE = ROOT / "tests" / "cases.json"
 STALE_LITERALS = ("gpt-5.6-luna", "light")
+PINNED_VERSION = "v0.1.1"
+PINNED_SKILL_URL = (
+    "https://github.com/wyizhou/orchestrateParallelWork-skill/"
+    f"tree/{PINNED_VERSION}/skills/orchestrate-parallel-work"
+)
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -81,6 +87,36 @@ def validate_openai(text: str, errors: list[str]) -> None:
         fail(errors, "agents/openai.yaml default_prompt must mention $orchestrate-parallel-work")
 
 
+def validate_readme(text: str, errors: list[str]) -> None:
+    if "目前仅支持 Codex" not in text:
+        fail(errors, "README must state that only Codex is currently supported")
+    if text.count(PINNED_SKILL_URL) < 2:
+        fail(errors, f"README must use the pinned {PINNED_VERSION} skill URL in both install sections")
+    heading = "### 给 AI 的安装 Prompt"
+    if heading not in text:
+        fail(errors, "README must provide an AI installation prompt")
+        return
+    prompt = text.split(heading, 1)[1]
+    pinned_add = (
+        f'npx --yes skills@1.5.21 add "{PINNED_SKILL_URL}" '
+        "--agent codex --global --yes"
+    )
+    if pinned_add not in prompt:
+        fail(errors, "README AI prompt must use the exact pinned global Codex add command")
+    if "npx --yes skills@1.5.21 list --global --agent codex" not in prompt:
+        fail(errors, "README AI prompt must verify the global Codex skill list")
+    if "update orchestrate-parallel-work" in prompt:
+        fail(errors, "README AI prompt must not use update across the legacy directory migration")
+    for expected_path in (
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/codex-runtime.md",
+        "references/validation.md",
+    ):
+        if f"`{expected_path}`" not in prompt:
+            fail(errors, f"README AI prompt must verify installed {expected_path}")
+
+
 def validate_cases(errors: list[str]) -> None:
     try:
         cases = json.loads(read(CASES_FILE, errors))
@@ -120,12 +156,14 @@ def validate_cases(errors: list[str]) -> None:
 
 def main() -> int:
     errors: list[str] = []
-    for path in (SKILL_DIR, SKILL_FILE, OPENAI_FILE, LICENSE_FILE, CASES_FILE):
+    for path in (README_FILE, SKILL_DIR, SKILL_FILE, OPENAI_FILE, LICENSE_FILE, CASES_FILE):
         if not path.exists():
             fail(errors, f"missing required path: {path.relative_to(ROOT)}")
+    readme = read(README_FILE, errors)
     skill = read(SKILL_FILE, errors)
     openai = read(OPENAI_FILE, errors)
     license_text = read(LICENSE_FILE, errors)
+    validate_readme(readme, errors)
     validate_frontmatter(skill, errors)
     validate_openai(openai, errors)
     if "MIT" not in license_text or "copyright" not in license_text.lower():
