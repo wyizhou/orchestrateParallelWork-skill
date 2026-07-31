@@ -79,3 +79,7 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill" 
 ```bash
 npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill" --skill "orchestrate-parallel-work" --agent codex
 ```
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
