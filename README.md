@@ -6,14 +6,3 @@
 
 - `SKILL.md`：完整的 skill 定义和执行规范。
 - `agents/openai.yaml`：Codex/OpenAI 界面元数据。
-
-## 来源
-
-本仓库从私有仓库 [`wyizhou/person_ai_repo`](https://github.com/wyizhou/person_ai_repo) 的
-`skills/orchestrate-parallel-work` 目录独立提取。
-
-- 源分支：`main`
-- 源提交：`e9f70de0c90fa6cd5ccecc003069dd6dac69a4cf`
-- 提取日期：2026-07-31
-
-`SKILL.md` 和 `agents/openai.yaml` 在提取时保持原样。
