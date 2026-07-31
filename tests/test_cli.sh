@@ -22,6 +22,8 @@ fi
 [ -f "$support_dir/SKILL.md" ]
 [ -f "$support_dir/LICENSE" ]
 [ -f "$support_dir/agents/openai.yaml" ]
+[ -f "$support_dir/references/codex-runtime.md" ]
+[ -f "$support_dir/references/validation.md" ]
 [ ! -e "$support_dir/README.md" ]
 
 after_status="$(git status --porcelain)"

@@ -30,9 +30,9 @@ Exact branch and workdir:
 
 ## Couple overrides to context strategy
 
-Use a full-history fork only when the unit needs the parent conversation and parent-runtime inheritance is acceptable. Full-history forks inherit the parent runtime and cannot accept explicit model or reasoning overrides.
+Use a full-history fork only when the unit needs the parent conversation and parent-runtime inheritance is acceptable. In the Codex spawn interface, omitting `fork_turns` or setting `fork_turns="all"` creates that full-history fork; it inherits the parent runtime and cannot accept explicit model or reasoning overrides.
 
-When an explicit model or reasoning override is required, use no-history or a bounded-context fork compatible with that override. Supply the unit contract, authoritative inputs, relevant accepted upstream outputs, exact branch/workdir, and only the task-local context needed. Do not rely on hidden parent context.
+When an explicit model or reasoning override is required, set `fork_turns="none"` or a positive bounded-turn string supported by the current interface. Supply the unit contract, authoritative inputs, relevant accepted upstream outputs, exact branch/workdir, and only the task-local context needed. Do not rely on hidden parent context.
 
 Keep independent research, analysis, and validation context separate from other units' conclusions. Do not disclose expected answers or implementers' self-assessments to a blind Validator.
 
