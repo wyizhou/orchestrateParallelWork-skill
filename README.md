@@ -6,7 +6,7 @@
 
 > **按工作单元动态选择模型与推理等级。**
 >
-> 它不会让整个复杂任务固定使用同一种配置，而是先遵守工作目录中 `AGENTS.md` 的明确规则；没有指定规则时，再根据每个单元的难度、风险、上下文规模、工具调用和验收要求，选择能够可靠完成任务且成本合适的模型与推理等级。边界清楚、低风险、易验证的单元可以使用轻量组合，多步推理、跨文件理解、复杂工具协作或高风险判断则使用更强组合。每次选择都会记录模型、推理等级和理由，并在执行前确认组合实际可用。
+> 它不会让整个复杂任务固定使用同一种配置。对每个工作单元，先遵守适用的 `AGENTS.md` 规则；再从当前运行时实际支持的选择中，按难度、风险、上下文规模、工具调用和验收要求挑选**足够可靠的最轻量组合**。适合时会继承父级配置。执行前会验证该组合确实可用，并记录所选配置及理由；不会把具体模型名称写死在规范中。
 
 ## 主要优势
 
@@ -38,7 +38,7 @@
 2. **评估是否值得拆分**：检查复杂度、依赖、风险、协调成本和可隔离性，决定直接完成、先串行解耦或进入并行编排。
 3. **冻结目标契约**：明确目标、非目标、权威输入、约束、风险、验收标准、交付位置和集成负责人。
 4. **建立共享基础**：仅在多个单元共同依赖时建立术语、接口、数据、模板或安全边界，并先完成验收。
-5. **设计工作单元**：为每个单元指定负责人、隔离方式、输入快照、产物、验证证据、模型与推理等级、集成顺序和失败回退。
+5. **设计工作单元**：为每个单元指定负责人、隔离方式、输入快照、产物、验证证据、经规则与可用性核对的模型/推理配置、集成顺序和失败回退。
 6. **按依赖分波次执行**：只启动前置依赖已通过、输入稳定且没有写入冲突的单元，并持续维护状态和证据。
 7. **逐单元验收并统一集成**：验证通过后才能接入整体；每完成一波都运行相关集成检查。
 8. **独立终验与交付**：从原始目标出发复核端到端结果、边界情况、安全性、可回滚性和交付完整性。
@@ -54,30 +54,58 @@
 
 ## 安装
 
-需要 Node.js 22.20.0 或更高版本，并确保 `npx` 可用。
+需要 Node.js 22.20.0 或更高版本，并确保 `npx` 可用。`skills@1.5.21` 是本项目已测试的 CLI 版本。
 
-### 一键全局安装
+### 最新版：全局安装
 
 将 skill 安装到当前用户的 Codex skills 目录：
 
 ```bash
-npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill" --skill "orchestrate-parallel-work" --agent codex --global --yes
+npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --global --yes
 ```
 
-### 安装到当前项目
+### 最新版：安装到当前项目
 
 将 skill 安装到当前项目的 Agent skills 目录：
 
 ```bash
-npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill" --skill "orchestrate-parallel-work" --agent codex --yes
+npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex --yes
 ```
 
-### 免安装临时运行
+### 可复现安装：v0.1.0
+
+需要固定版本时，使用 GitHub 中该版本的直接 skill 目录 URL，并固定已测试的 CLI：
+
+```bash
+npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.0/skills/orchestrate-parallel-work" --agent codex --global --yes
+```
+
+### 免安装临时使用
 
 下载到临时目录并启动 Codex，不进行持久安装：
 
 ```bash
-npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill" --skill "orchestrate-parallel-work" --agent codex
+npx --yes skills use "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex
+```
+
+### 给 AI 的安装 Prompt
+
+将下面英文 Prompt 原样交给 AI；它只负责安装和验证，不会执行该 skill：
+
+```text
+Install and verify the `orchestrate-parallel-work` skill globally for Codex only. Do not install it for any other agent and do not modify, remove, update, or reinstall unrelated skills. First inspect the installed global Codex skills. If `orchestrate-parallel-work` is already installed, do not delete it; use this non-destructive update command instead:
+
+npx --yes skills@1.5.21 update orchestrate-parallel-work --global --yes
+
+If it is not already installed, run this exact pinned v0.1.0 installation command:
+
+npx --yes skills@1.5.21 add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/v0.1.0/skills/orchestrate-parallel-work" --agent codex --global --yes
+
+Read the complete output of every command. If output could be truncated, redirect it to a temporary file and read that file completely. Then verify the result with this exact command:
+
+npx --yes skills@1.5.21 list --global --agent codex
+
+Do not run, invoke, or otherwise execute the orchestration skill; only install/update and verify it. Report the installation path and the verification result.
 ```
 
 ## 许可证
