@@ -1,0 +1,22 @@
+name: Validate skill package
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 tests/validate_repository.py
+      - run: bash tests/test_cli.sh
+      - run: git diff --check HEAD^ HEAD

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "single-output-no-split", "scenario": "A small request has one clear output and one write surface.", "invariants": ["No subagents are created.", "Work proceeds as one unit."]},
+    {"id": "plan-only-no-execution", "scenario": "The user asks only for a plan for a multi-part task.", "invariants": ["Returns an orchestration plan.", "Creates no subagents, worktrees, branches, or mutations."]},
+    {"id": "coupled-work-serial-or-decouple", "scenario": "Two proposed units both need an unsettled shared interface.", "invariants": ["Work remains serial until the interface is resolved, or a shared foundation is accepted first.", "Concurrent writes to the shared interface do not occur."]},
+    {"id": "independent-workstreams-may-parallelize", "scenario": "Two units have fixed inputs, distinct owners, no write conflicts, and separate acceptance checks.", "invariants": ["The units may be scheduled in the same parallel wave.", "Each unit retains isolated ownership and verification evidence."]},
+    {"id": "agents-rule-wins", "scenario": "An applicable AGENTS.md explicitly sets a model or reasoning rule for a unit.", "invariants": ["The applicable rule is used for each field it specifies.", "Any unspecified field is selected under the normal policy."]},
+    {"id": "unavailable-explicit-model-no-substitution", "scenario": "An applicable AGENTS.md explicitly requires a model that is unavailable.", "invariants": ["The explicit model is not silently replaced.", "The work is handled by an allowed fallback rule, serial coordination, or an explained limitation."]},
+    {"id": "foundation-change-stales-results", "scenario": "A shared foundation changes after dependent units submitted results.", "invariants": ["Affected dependent results are marked stale.", "Affected work is revalidated or reissued against the new foundation snapshot."]},
+    {"id": "blind-validator-no-conclusion", "scenario": "An independent validator starts its first pass after integration.", "invariants": ["Initial context excludes implementer self-assessments and expected conclusions.", "Validation reports evidence and reproducible findings rather than a supplied conclusion."]},
+    {"id": "worktree-cwd-isolation", "scenario": "Code work is dispatched to isolated worktrees.", "invariants": ["Each worker writes only in its assigned worktree.", "The assigned worktree is the worker current directory.", "The integration branch owns final integration."]},
+    {"id": "full-history-fork-inherits-parent", "scenario": "A subagent is spawned with a full-history fork.", "invariants": ["The subagent inherits the parent model and reasoning configuration.", "The spawn request does not set model or reasoning overrides."]}
+  ]
+}
