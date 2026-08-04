@@ -59,6 +59,49 @@ test("SSE emits the current revision and a later landed revision",async(t)=>{
   assert.match(text,/event: revision/); assert.match(text,/id: 8/); controller.abort();
 });
 
+test("terminal revision is rendered, acknowledged, and followed by graceful shutdown",async(t)=>{
+  const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
+  const dashboard=await createDashboardServer({runDir:directory,port:0,interval:20,finalizationGraceMs:2_000}); t.after(()=>dashboard.close());
+  const controller=new AbortController(); t.after(()=>controller.abort());
+  const response=await fetch(`${dashboard.url}/api/events?client_id=browser-1`,{signal:controller.signal});
+  const reader=response.body.getReader(); const decoder=new TextDecoder(); let stream="";
+  while(!stream.includes("id: 7")) stream+=decoder.decode((await reader.read()).value,{stream:true});
+
+  await writeFile(path.join(directory,"state.json"),JSON.stringify({revision:8,phase:"completed",updated_at:"2026-08-04T00:00:00Z"}));
+  const terminalDeadline=Date.now()+2_000;
+  while(!stream.includes("event: terminal")&&Date.now()<terminalDeadline) stream+=decoder.decode((await reader.read()).value,{stream:true});
+  assert.match(stream,/event: terminal/);
+  assert.match(stream,/"revision":8/);
+
+  const finalSnapshot=await (await fetch(`${dashboard.url}/api/snapshot`)).json();
+  assert.equal(finalSnapshot.revision,8);
+  assert.equal(finalSnapshot.phase,"completed");
+  const acknowledgement=await fetch(`${dashboard.url}/api/finalization-ack`,{method:"POST",headers:{"x-dashboard-client-id":"browser-1","x-dashboard-revision":"8"}});
+  assert.equal(acknowledgement.status,202);
+  assert.deepEqual(await acknowledgement.json(),{acknowledged:true,revision:8});
+
+  await Promise.race([dashboard.closed,new Promise((_,reject)=>setTimeout(()=>reject(new Error("Dashboard did not stop after acknowledgement")),1_000))]);
+  assert.equal(dashboard.server.listening,false);
+});
+
+test("terminal transition shuts down after the grace period when no browser is connected",async(t)=>{
+  const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
+  const dashboard=await createDashboardServer({runDir:directory,port:0,interval:20,finalizationGraceMs:60}); t.after(()=>dashboard.close());
+  await writeFile(path.join(directory,"state.json"),JSON.stringify({revision:8,phase:"failed"}));
+  await Promise.race([dashboard.closed,new Promise((_,reject)=>setTimeout(()=>reject(new Error("Dashboard did not stop after its grace period")),1_000))]);
+  assert.equal(dashboard.store.snapshot.phase,"failed");
+  assert.equal(dashboard.store.snapshot.revision,8);
+});
+
+test("a dashboard opened for an already-terminal run stays available for retrospective inspection",async(t)=>{
+  const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
+  await writeFile(path.join(directory,"state.json"),JSON.stringify({revision:8,phase:"completed"}));
+  const dashboard=await createDashboardServer({runDir:directory,port:0,interval:20,finalizationGraceMs:40}); t.after(()=>dashboard.close());
+  await new Promise((resolve)=>setTimeout(resolve,100));
+  assert.equal(dashboard.server.listening,true);
+  assert.equal((await fetch(`${dashboard.url}/api/snapshot`)).status,200);
+});
+
 test("occupied port fails instead of silently switching ports",async(t)=>{
   const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
   const blocker=net.createServer(); await new Promise((resolve)=>blocker.listen(0,"127.0.0.1",resolve)); t.after(()=>new Promise((resolve)=>blocker.close(resolve)));

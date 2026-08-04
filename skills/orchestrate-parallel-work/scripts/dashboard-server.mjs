@@ -7,6 +7,8 @@ import { SnapshotStore } from "./dashboard-state.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 8088;
+const DEFAULT_FINALIZATION_GRACE_MS = 5_000;
+const TERMINAL_PHASES = new Set(["completed", "failed", "cancelled", "rejected", "revoked", "superseded"]);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const assetDir = path.resolve(scriptDir, "../assets/dashboard");
 const ASSETS = new Map([
@@ -39,26 +41,84 @@ function matchId(pathname, prefix) {
   }
 }
 
-export async function createDashboardServer({ runDir, port = DEFAULT_PORT, interval = 600 } = {}) {
+export async function createDashboardServer({ runDir, port = DEFAULT_PORT, interval = 600, finalizationGraceMs = DEFAULT_FINALIZATION_GRACE_MS } = {}) {
   if (!runDir) throw new Error("--run-dir is required");
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Port must be an integer between 1 and 65535");
+  if (!Number.isInteger(finalizationGraceMs) || finalizationGraceMs < 0) throw new Error("finalizationGraceMs must be a non-negative integer");
   const store = new SnapshotStore(runDir, { interval });
   await store.start();
-  const clients = new Set();
-  const broadcast = (snapshot) => {
-    const payload = `id: ${snapshot.revision}\nevent: revision\ndata: ${JSON.stringify({ revision: snapshot.revision, updated_at: snapshot.updated_at })}\n\n`;
-    for (const client of clients) client.write(payload);
+  const clients = new Map();
+  let finalization = null;
+  let closePromise = null;
+  let resolveClosed;
+  const closed = new Promise((resolve) => { resolveClosed = resolve; });
+  const sendEvent = (response, { id, event, data }) => {
+    response.write(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
-  store.on("revision", broadcast);
+  const broadcast = (snapshot) => {
+    for (const response of clients.keys()) sendEvent(response, { id: snapshot.revision, event: "revision", data: { revision: snapshot.revision, updated_at: snapshot.updated_at } });
+  };
+  const disconnectClients = () => {
+    for (const client of clients.keys()) client.end();
+    clients.clear();
+  };
+  const closeServer = () => {
+    if (closePromise) return closePromise;
+    store.stop();
+    if (finalization?.timer) clearTimeout(finalization.timer);
+    for (const response of clients.keys()) sendEvent(response, { event: "shutdown", data: { revision: finalization?.revision ?? store.snapshot?.revision ?? null, phase: finalization?.phase ?? store.snapshot?.phase ?? null, terminal: Boolean(finalization) } });
+    disconnectClients();
+    closePromise = new Promise((resolve, reject) => {
+      if (!server.listening) { resolve(); return; }
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    return closePromise;
+  };
+  const maybeCloseAfterAcknowledgements = () => {
+    if (finalization?.hadAcknowledgableClients && finalization.pending.size === 0 && !finalization.ackCloseScheduled) {
+      finalization.ackCloseScheduled = true;
+      setTimeout(() => void closeServer(), 25);
+    }
+  };
+  const beginFinalization = (snapshot) => {
+    if (finalization || !TERMINAL_PHASES.has(snapshot.phase)) return;
+    finalization = {
+      revision: snapshot.revision,
+      phase: snapshot.phase,
+      pending: new Set([...clients.values()].map((client) => client.id).filter(Boolean)),
+      hadAcknowledgableClients: [...clients.values()].some((client) => client.id),
+      ackCloseScheduled: false,
+      timer: setTimeout(() => void closeServer(), finalizationGraceMs),
+    };
+    for (const response of clients.keys()) sendEvent(response, { id: snapshot.revision, event: "terminal", data: { revision: snapshot.revision, phase: snapshot.phase, grace_ms: finalizationGraceMs } });
+    maybeCloseAfterAcknowledgements();
+  };
+  store.on("revision", (snapshot) => {
+    broadcast(snapshot);
+    beginFinalization(snapshot);
+  });
   const server = http.createServer(async (request, response) => {
     try {
       const method = request.method ?? "GET";
+      const requestUrl = new URL(request.url ?? "/", `http://${HOST}`);
+      const pathname = requestUrl.pathname;
+      if (method === "POST" && pathname === "/api/finalization-ack") {
+        const clientId = request.headers["x-dashboard-client-id"];
+        const revision = Number(request.headers["x-dashboard-revision"]);
+        if (!finalization || typeof clientId !== "string" || revision !== finalization.revision || !finalization.pending.has(clientId)) {
+          json(response, 409, { acknowledged: false, error: "No matching final snapshot is awaiting acknowledgement" });
+          return;
+        }
+        finalization.pending.delete(clientId);
+        json(response, 202, { acknowledged: true, revision });
+        maybeCloseAfterAcknowledgements();
+        return;
+      }
       if (!['GET', 'HEAD'].includes(method)) {
         response.writeHead(405, { allow: "GET, HEAD", "content-type": "text/plain; charset=utf-8" });
         response.end("Method Not Allowed");
         return;
       }
-      const pathname = new URL(request.url ?? "/", `http://${HOST}`).pathname;
       const head = method === "HEAD";
       if (ASSETS.has(pathname)) {
         await staticAsset(response, pathname, head);
@@ -93,14 +153,24 @@ export async function createDashboardServer({ runDir, port = DEFAULT_PORT, inter
         }
         response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         response.write(": connected\n\n");
-        clients.add(response);
+        const clientId = requestUrl.searchParams.get("client_id");
+        clients.set(response, { id: clientId });
         if (store.snapshot) {
-          response.write(`id: ${store.snapshot.revision}\nevent: revision\ndata: ${JSON.stringify({ revision: store.snapshot.revision, updated_at: store.snapshot.updated_at })}\n\n`);
+          sendEvent(response, { id: store.snapshot.revision, event: "revision", data: { revision: store.snapshot.revision, updated_at: store.snapshot.updated_at } });
+        }
+        if (finalization) {
+          if (clientId) {
+            finalization.pending.add(clientId);
+            finalization.hadAcknowledgableClients = true;
+          }
+          sendEvent(response, { id: finalization.revision, event: "terminal", data: { revision: finalization.revision, phase: finalization.phase, grace_ms: finalizationGraceMs } });
         }
         const heartbeat = setInterval(() => response.write(": heartbeat\n\n"), 15_000);
         request.on("close", () => {
           clearInterval(heartbeat);
           clients.delete(response);
+          if (clientId) finalization?.pending.delete(clientId);
+          maybeCloseAfterAcknowledgements();
         });
         return;
       }
@@ -109,13 +179,10 @@ export async function createDashboardServer({ runDir, port = DEFAULT_PORT, inter
       json(response, 500, { error: error instanceof Error ? error.message : String(error) });
     }
   });
-  const disconnectClients = () => {
-    for (const client of clients) client.end();
-    clients.clear();
-  };
   server.on("close", () => {
     store.stop();
     disconnectClients();
+    resolveClosed();
   });
   try {
     await new Promise((resolve, reject) => {
@@ -134,11 +201,8 @@ export async function createDashboardServer({ runDir, port = DEFAULT_PORT, inter
     host: HOST,
     port: actualPort,
     url: `http://${HOST}:${actualPort}`,
-    close: () => {
-      store.stop();
-      disconnectClients();
-      return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    },
+    closed,
+    close: closeServer,
   };
 }
 
@@ -165,6 +229,8 @@ async function main() {
     }
     const dashboard = await createDashboardServer(options);
     process.stdout.write(`Orchestration dashboard: ${dashboard.url}\n`);
+    await dashboard.closed;
+    process.stdout.write("Dashboard stopped after synchronizing the final run snapshot.\n");
   } catch (error) {
     const detail = error?.code === "EADDRINUSE" ? `Port ${error.port ?? DEFAULT_PORT} is already in use; choose another with --port.` : error.message;
     process.stderr.write(`Dashboard failed: ${detail}\n`);

@@ -106,4 +106,8 @@ Validator 未通过时由 Coordinator 创建修复 attempt，并在修复后进�
 
 ## 8. Report and close
 
-保持 Dashboard 与落地的 Graph、Task、Artifact、Registry 和事件同步。最终报告批准版本、实际波次与峰值、Node 状态、Artifact 版本、测试/lint/集成/独立验证证据、偏差、未解决风险和 Dashboard 状态。只有终端产物集成且独立验证通过，计划才能标记 `completed`。
+保持 Dashboard 与落地的 Graph、Task、Artifact、Registry 和事件同步。只有终端产物集成且独立验证通过，计划才能标记 `completed`。
+
+结束时先原子写入全部最终 Task、Artifact、Registry、Node Run 和事实事件，再把 `state.json` 作为最后一次写入递增 revision 并设置 `completed`、`failed`、`cancelled` 或其他实际终态。不要在最终 revision 落地前停止 Dashboard。服务检测到终态后会发布最终 Snapshot，等待已连接浏览器完成渲染确认，并在5秒超时兜底后自动关闭；当前页面保留最终画面且停止重连，持久化运行目录可供以后重新启动 Dashboard 检查。Coordinator 不得提前强制终止该进程。
+
+最终报告批准版本、实际波次与峰值、Node 状态、Artifact 版本、测试/lint/集成/独立验证证据、偏差、未解决风险、最终 Dashboard revision 和服务已关闭状态。

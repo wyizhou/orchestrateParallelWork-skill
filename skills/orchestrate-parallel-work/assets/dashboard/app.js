@@ -1,6 +1,10 @@
 const $ = (selector) => document.querySelector(selector);
 let snapshot;
 let polling;
+let terminalState;
+let terminalSync;
+const dashboardClientId = globalThis.crypto?.randomUUID?.() ?? `dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const terminalLabels = { completed:"Run complete", failed:"Run failed", cancelled:"Run cancelled", rejected:"Plan rejected", revoked:"Plan revoked", superseded:"Plan superseded" };
 
 function element(name, attributes = {}, text) {
   const node = document.createElement(name);
@@ -120,16 +124,61 @@ async function refresh() {
   try {
     const response = await fetch("/api/snapshot", { cache:"no-store" });
     if (!response.ok) throw new Error((await response.json()).error ?? `HTTP ${response.status}`);
-    render(await response.json()); $("#connection").textContent="Live"; $("#connection").classList.add("live");
+    const value = await response.json();
+    render(value);
+    if (!terminalState) {
+      $("#connection").textContent="Live";
+      $("#connection").classList.add("live");
+    }
+    return value;
   } catch (error) { $("#connection").textContent="Waiting"; $("#connection").classList.remove("live"); $("#notice").textContent=error.message; $("#notice").classList.add("show"); }
 }
 
-function startPolling() { if (!polling) polling=setInterval(refresh,2000); }
+function startPolling() { if (!polling && !terminalState) polling=setInterval(refresh,2000); }
 function stopPolling() { if (polling) clearInterval(polling); polling=undefined; }
-const events = new EventSource("/api/events");
+function showStopped(event) {
+  const shutdown = event?.data ? JSON.parse(event.data) : {};
+  terminalState = { ...(terminalState ?? {}), ...shutdown, stopped:true };
+  stopPolling();
+  events.close();
+  $("#connection").textContent=`${terminalLabels[terminalState.phase] ?? "Server"} · Server stopped`;
+  $("#connection").classList.remove("live");
+}
+
+async function synchronizeTerminalState(event) {
+  if (terminalSync) return terminalSync;
+  const terminal = JSON.parse(event.data);
+  terminalState = { ...terminal, stopped:false };
+  stopPolling();
+  $("#connection").textContent="Finalizing · syncing final snapshot";
+  $("#connection").classList.add("live");
+  terminalSync = (async () => {
+    const value = await refresh();
+    if (!value || value.revision !== terminal.revision || value.phase !== terminal.phase) throw new Error("Final snapshot revision does not match the terminal event");
+    $("#connection").textContent=`${terminalLabels[terminal.phase] ?? "Run finished"} · stopping server`;
+    const response = await fetch("/api/finalization-ack", {
+      method:"POST",
+      headers:{ "x-dashboard-client-id":dashboardClientId, "x-dashboard-revision":String(terminal.revision) },
+    });
+    if (!response.ok) throw new Error((await response.json()).error ?? `Finalization acknowledgement failed: HTTP ${response.status}`);
+  })().catch((error) => {
+    $("#connection").textContent="Finalizing · waiting for shutdown";
+    $("#connection").classList.remove("live");
+    $("#notice").textContent=error.message;
+    $("#notice").classList.add("show");
+  });
+  return terminalSync;
+}
+
+const events = new EventSource(`/api/events?client_id=${encodeURIComponent(dashboardClientId)}`);
 events.addEventListener("revision", () => { stopPolling(); void refresh(); });
-events.onopen = () => { stopPolling(); $("#connection").classList.add("live"); };
-events.onerror = () => { $("#connection").textContent="Reconnecting"; $("#connection").classList.remove("live"); startPolling(); };
+events.addEventListener("terminal", (event) => void synchronizeTerminalState(event));
+events.addEventListener("shutdown", showStopped);
+events.onopen = () => { stopPolling(); if (!terminalState) { $("#connection").textContent="Live"; $("#connection").classList.add("live"); } };
+events.onerror = () => {
+  if (terminalState) { showStopped(); return; }
+  $("#connection").textContent="Reconnecting"; $("#connection").classList.remove("live"); startPolling();
+};
 document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll("nav button,.view").forEach((item)=>item.classList.remove("active")); button.classList.add("active"); $(`#${button.dataset.view}`).classList.add("active"); }));
 $("#close-drawer").addEventListener("click",()=>$("#drawer").classList.remove("open"));
 void refresh();
