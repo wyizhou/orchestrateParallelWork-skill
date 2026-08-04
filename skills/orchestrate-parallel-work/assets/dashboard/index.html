@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orchestration Graph</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header>
+    <div><p class="eyebrow">GRAPH CONTROL PLANE</p><h1>Orchestration run</h1></div>
+    <div id="connection" class="connection">Connecting…</div>
+  </header>
+  <section id="summary" class="summary" aria-label="Run summary"></section>
+  <nav aria-label="Dashboard views">
+    <button class="active" data-view="graph">Graph</button><button data-view="tasks">Tasks</button><button data-view="artifacts">Artifacts</button><button data-view="runs">Runs</button><button data-view="events">Events</button>
+  </nav>
+  <main>
+    <section id="graph" class="view active"><div class="graph-shell"><svg id="dag" role="img" aria-label="Task dependency graph"></svg></div></section>
+    <section id="tasks" class="view"></section>
+    <section id="artifacts" class="view"></section>
+    <section id="runs" class="view"></section>
+    <section id="events" class="view"></section>
+  </main>
+  <aside id="drawer" aria-live="polite"><button id="close-drawer" aria-label="Close details">×</button><h2 id="drawer-title">Details</h2><pre id="drawer-content"></pre></aside>
+  <div id="notice" role="status"></div>
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>
