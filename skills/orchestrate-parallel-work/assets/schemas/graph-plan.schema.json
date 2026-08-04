@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestrate-parallel-work.local/schemas/graph-plan.schema.json",
+  "title": "Graph Plan v1",
+  "type": "object",
+  "required": ["schema_version", "plan_id", "plan_version", "status", "capacity", "nodes", "edges", "terminal_outputs"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "status": { "enum": ["draft", "graph_validated", "awaiting_user_approval", "approved", "running", "validating", "completed", "rejected", "revision_requested", "revoked", "failed", "cancelled", "superseded"] },
+    "goal_contract": { "type": "object" },
+    "capacity": {
+      "type": "object",
+      "required": ["hard_limit", "runtime_limit", "permission_limit", "effective_capacity"],
+      "properties": {
+        "hard_limit": { "const": 15 },
+        "runtime_limit": { "type": "integer", "minimum": 1 },
+        "permission_limit": { "type": "integer", "minimum": 1 },
+        "effective_capacity": { "type": "integer", "minimum": 1, "maximum": 15 }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["node_id", "node_type", "agent_type_id", "task_ref", "input_ports", "output_ports"],
+        "properties": {
+          "node_id": { "type": "string", "minLength": 1 },
+          "node_type": { "enum": ["work", "integration", "validation"] },
+          "agent_type_id": { "type": "string", "minLength": 1 },
+          "task_ref": { "type": "string", "minLength": 1 },
+          "input_ports": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "output_ports": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "retry_policy": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["edge_id", "kind", "from", "to"],
+        "properties": {
+          "edge_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["data", "control"] },
+          "from": { "$ref": "#/$defs/endpoint" },
+          "to": { "$ref": "#/$defs/endpoint" },
+          "artifact_contract_ref": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "terminal_outputs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "required": ["node_id"],
+      "properties": { "node_id": { "type": "string", "minLength": 1 }, "port": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": ["agent_role_count", "node_count", "edge_count", "task_count", "planned_artifact_count", "estimated_peak_agents", "execution_shape"],
+      "properties": {
+        "agent_role_count": { "type": "integer", "minimum": 1 }, "node_count": { "type": "integer", "minimum": 1 },
+        "edge_count": { "type": "integer", "minimum": 0 }, "task_count": { "type": "integer", "minimum": 1 },
+        "planned_artifact_count": { "type": "integer", "minimum": 1 }, "estimated_peak_agents": { "type": "integer", "minimum": 1, "maximum": 15 },
+        "execution_shape": { "enum": ["serial", "parallel", "hybrid"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

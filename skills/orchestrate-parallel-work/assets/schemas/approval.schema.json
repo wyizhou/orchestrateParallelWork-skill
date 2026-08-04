@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://orchestrate-parallel-work.local/schemas/approval.schema.json", "title": "Plan Approval v1",
+  "type": "object", "required": ["schema_version", "plan_id", "plan_version", "plan_hash", "status", "approved_capacity", "approved_external_effects", "approved_validation_exceptions"],
+  "properties": {
+    "schema_version": { "const": "1.0" }, "plan_id": { "type": "string", "minLength": 1 }, "plan_version": { "type": "integer", "minimum": 1 },
+    "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "status": { "enum": ["awaiting_user_approval", "approved", "rejected", "revision_requested", "revoked"] },
+    "approved_by": { "type": "string" }, "approved_at": { "type": "string", "format": "date-time" }, "approved_capacity": { "type": "integer", "minimum": 1, "maximum": 15 },
+    "approved_external_effects": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "approved_validation_exceptions": { "type": "array", "items": { "type": "object", "required": ["task_id", "gate", "reason"], "properties": { "task_id": { "type": "string" }, "gate": { "enum": ["test_gate", "lint_gate"] }, "reason": { "type": "string" } }, "additionalProperties": false } }
+  }, "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestrate-parallel-work.local/schemas/artifact-catalog.schema.json",
+  "title": "Artifact Contract Catalog v1",
+  "type": "object",
+  "required": ["schema_version", "artifacts"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "artifacts": { "type": "array", "minItems": 1, "items": {
+      "type": "object", "required": ["artifact_contract_id", "artifact_type", "schema_version", "purpose", "producer", "consumers", "delivery", "acceptance_checks", "required"],
+      "properties": {
+        "artifact_contract_id": { "type": "string", "minLength": 1 }, "artifact_type": { "type": "string", "minLength": 1 }, "schema_version": { "type": "string", "minLength": 1 },
+        "purpose": { "enum": ["intermediate", "delivery", "evidence"] },
+        "producer": { "$ref": "#/$defs/endpoint" }, "consumers": { "type": "array", "items": { "$ref": "#/$defs/endpoint" } },
+        "delivery": { "type": "object", "required": ["format", "path"], "properties": { "format": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
+        "content_schema": { "type": "object" }, "schema_ref": { "type": "string", "minLength": 1 },
+        "acceptance_checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "required": { "type": "boolean" }
+      }, "additionalProperties": false
+    }}
+  },
+  "$defs": { "endpoint": { "type": "object", "required": ["node_id", "port"], "properties": { "node_id": { "type": "string", "minLength": 1 }, "port": { "type": "string", "minLength": 1 } }, "additionalProperties": false } },
+  "additionalProperties": false
+}

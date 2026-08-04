@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://orchestrate-parallel-work.local/schemas/artifact-registry.schema.json", "title": "Artifact Registry v1",
+  "type": "object", "required": ["schema_version", "execution_run_id", "artifacts"],
+  "properties": {
+    "schema_version": { "const": "1.0" }, "execution_run_id": { "type": "string", "minLength": 1 },
+    "artifacts": { "type": "array", "items": { "type": "object", "required": ["artifact_id", "artifact_contract_id", "artifact_version", "status", "producer", "digest", "created_at"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 }, "artifact_contract_id": { "type": "string", "minLength": 1 }, "artifact_version": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["submitted", "accepted", "rejected", "stale"] },
+        "producer": { "type": "object", "required": ["node_id", "node_run_id", "attempt", "agent_instance_id"], "properties": { "node_id": { "type": "string" }, "node_run_id": { "type": "string" }, "attempt": { "type": "integer", "minimum": 1 }, "agent_instance_id": { "type": "string" } }, "additionalProperties": false },
+        "uri": { "type": "string" }, "files": { "type": "array", "items": { "type": "string" } }, "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "created_at": { "type": "string", "format": "date-time" }, "accepted_at": { "type": "string", "format": "date-time" }, "validation_evidence_refs": { "type": "array", "items": { "type": "string" } }
+      }, "additionalProperties": false }
+    }
+  }, "additionalProperties": false
+}
