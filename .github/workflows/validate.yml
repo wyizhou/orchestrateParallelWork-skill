@@ -18,5 +18,7 @@ jobs:
         with:
           node-version: '22'
       - run: python3 tests/validate_repository.py
+      - run: npm test
+      - run: npm run lint
       - run: bash tests/test_cli.sh
       - run: git diff --check HEAD^ HEAD

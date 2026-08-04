@@ -1,0 +1,12 @@
+{
+  "name": "orchestrate-parallel-work-skill",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "lint": "find skills/orchestrate-parallel-work -type f \"(\" -name '*.mjs' -o -name '*.js' \")\" -exec node --check '{}' ';'"
+  }
+}

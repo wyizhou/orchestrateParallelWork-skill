@@ -9,12 +9,13 @@ const ROOT_FILES = [
   "state.json",
   "graph-plan.json",
   "agent-types.json",
+  "artifacts/catalog.json",
   "artifact-registry.json",
   "node-runs.json",
   "approval.json",
   "events.ndjson",
 ];
-const COLLECTIONS = ["tasks", "artifact-contracts", "artifacts"];
+const COLLECTIONS = ["tasks", "artifact-payloads"];
 
 async function readText(file) {
   const stat = await fs.stat(file);
@@ -80,9 +81,9 @@ function idOf(value, ...keys) {
 }
 
 export function deriveEdgeStatus(edge, nodesById, artifactsById) {
-  const sourceId = String(edge.from?.node ?? edge.from ?? "");
-  const targetId = String(edge.to?.node ?? edge.to ?? "");
-  const artifactId = String(edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");
+  const sourceId = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? "");
+  const targetId = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
+  const artifactId = String(edge.artifact_contract_ref ?? edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");
   const source = nodesById.get(sourceId) ?? {};
   const target = nodesById.get(targetId) ?? {};
   const artifact = artifactsById.get(artifactId) ?? {};
@@ -111,8 +112,8 @@ function graphIssues(nodes, edges) {
   const indegree = new Map([...ids].map((id) => [id, 0]));
   const outgoing = new Map([...ids].map((id) => [id, []]));
   for (const edge of edges) {
-    const from = String(edge.from?.node ?? edge.from ?? "");
-    const to = String(edge.to?.node ?? edge.to ?? "");
+    const from = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? "");
+    const to = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
     if (!ids.has(from) || !ids.has(to)) {
       issues.push(`Dangling edge: ${from || "?"} -> ${to || "?"}`);
       continue;
@@ -162,13 +163,13 @@ async function signature(runDir) {
 export async function loadSnapshot(runDir) {
   const graph = await readJson(path.join(runDir, "graph-plan.json"));
   if (!graph) throw new Error("graph-plan.json has not landed yet");
-  const [run, state, agentTypesRaw, tasks, artifactContracts, artifactPayloads, registryRaw, nodeRunsRaw, approval, events] = await Promise.all([
+  const [run, state, agentTypesRaw, tasks, artifactCatalogRaw, artifactPayloads, registryRaw, nodeRunsRaw, approval, events] = await Promise.all([
     readJson(path.join(runDir, "run.json"), {}),
     readJson(path.join(runDir, "state.json"), {}),
     readJson(path.join(runDir, "agent-types.json"), []),
     readCollection(runDir, "tasks"),
-    readCollection(runDir, "artifact-contracts"),
-    readCollection(runDir, "artifacts"),
+    readJson(path.join(runDir, "artifacts", "catalog.json"), { artifacts: [] }),
+    readCollection(runDir, "artifact-payloads"),
     readJson(path.join(runDir, "artifact-registry.json"), []),
     readJson(path.join(runDir, "node-runs.json"), []),
     readJson(path.join(runDir, "approval.json"), {}),
@@ -177,34 +178,39 @@ export async function loadSnapshot(runDir) {
   const nodes = arrayValue(graph.nodes);
   const edges = arrayValue(graph.edges);
   const agentTypes = arrayValue(agentTypesRaw, "agent_types", "types");
+  const artifactContracts = arrayValue(artifactCatalogRaw, "artifacts", "contracts");
   const registry = arrayValue(registryRaw, "artifacts", "entries");
-  const nodeRuns = arrayValue(nodeRunsRaw, "node_runs", "runs");
+  const nodeRuns = arrayValue(nodeRunsRaw, "entries", "node_runs", "runs");
   const runsByNode = new Map(nodeRuns.map((item) => [idOf(item, "node_id", "task_id", "id"), item]));
   const normalizedNodes = nodes.map((node) => {
     const runRecord = runsByNode.get(idOf(node, "id", "node_id")) ?? {};
+    const checks = new Map(arrayValue(runRecord.self_checks).map((check) => [check.gate, check.status]));
     return {
       ...node,
       id: idOf(node, "id", "node_id"),
       status: runRecord.status ?? node.status ?? "planned",
-      test_status: runRecord.test_status ?? runRecord.validation?.tests?.status ?? node.test_status,
-      lint_status: runRecord.lint_status ?? runRecord.validation?.lint?.status ?? node.lint_status,
+      test_status: runRecord.test_status ?? checks.get("test_gate") ?? runRecord.validation?.tests?.status ?? node.test_status,
+      lint_status: runRecord.lint_status ?? checks.get("lint_gate") ?? runRecord.validation?.lint?.status ?? node.lint_status,
       validator_status: runRecord.validator_status ?? runRecord.validation?.validator?.status ?? node.validator_status,
     };
   });
   const nodesById = new Map(normalizedNodes.map((node) => [node.id, node]));
   const artifactsById = new Map();
   for (const item of [...artifactContracts, ...registry, ...artifactPayloads]) {
-    const id = idOf(item, "artifact_id", "id");
+    const id = idOf(item, "artifact_contract_id", "artifact_id", "id");
     if (id) artifactsById.set(id, { ...(artifactsById.get(id) ?? {}), ...item });
   }
   const normalizedEdges = edges.map((edge, index) => ({
     ...edge,
-    id: idOf(edge, "id") || `edge-${index + 1}`,
+    id: idOf(edge, "edge_id", "id") || `edge-${index + 1}`,
     status: deriveEdgeStatus(edge, nodesById, artifactsById),
   }));
-  const platformCapacity = Number(run.platform_capacity ?? state.platform_capacity ?? 15);
-  const permissionCapacity = Number(run.permission_capacity ?? state.permission_capacity ?? 15);
-  const effectiveCapacity = Math.max(0, Math.min(15, Number.isFinite(platformCapacity) ? platformCapacity : 15, Number.isFinite(permissionCapacity) ? permissionCapacity : 15));
+  const platformCapacity = Number(graph.capacity?.runtime_limit ?? run.platform_capacity ?? state.platform_capacity);
+  const permissionCapacity = Number(graph.capacity?.permission_limit ?? run.permission_capacity ?? state.permission_capacity);
+  const capacityKnown = Number.isInteger(platformCapacity) && platformCapacity > 0 && Number.isInteger(permissionCapacity) && permissionCapacity > 0;
+  const effectiveCapacity = capacityKnown ? Math.min(15, platformCapacity, permissionCapacity) : null;
+  const activeAgentIds = new Set(nodeRuns.filter((item) => item.status === "active").map((item) => item.agent_instance_id).filter(Boolean));
+  if (nodeRunsRaw?.coordinator_agent_instance_id) activeAgentIds.add(nodeRunsRaw.coordinator_agent_instance_id);
   return {
     revision: state.revision ?? run.revision ?? 0,
     updated_at: state.updated_at ?? run.updated_at ?? null,
@@ -215,7 +221,7 @@ export async function loadSnapshot(runDir) {
     capacity: { hard_limit: 15, platform: platformCapacity, permission: permissionCapacity, effective: effectiveCapacity },
     counts: {
       agent_roles: agentTypes.length,
-      agent_instances: Number(run.planned_agent_instances ?? 0),
+      agent_instances: activeAgentIds.size,
       nodes: normalizedNodes.length,
       edges: normalizedEdges.length,
       tasks: tasks.length,
@@ -310,9 +316,10 @@ export class SnapshotStore extends EventEmitter {
   }
 
   artifact(id) {
-    const contract = this.snapshot?.artifact_contracts.find((item) => idOf(item, "artifact_id", "id") === id) ?? null;
-    const registry = this.snapshot?.artifact_registry.find((item) => idOf(item, "artifact_id", "id") === id) ?? null;
-    const payload = this.snapshot?.artifacts.find((item) => idOf(item, "artifact_id", "id") === id) ?? null;
+    const registry = this.snapshot?.artifact_registry.find((item) => [idOf(item, "artifact_id", "id"), idOf(item, "artifact_contract_id")].includes(id)) ?? null;
+    const contractId = registry?.artifact_contract_id ?? id;
+    const contract = this.snapshot?.artifact_contracts.find((item) => idOf(item, "artifact_contract_id", "artifact_id", "id") === contractId) ?? null;
+    const payload = this.snapshot?.artifacts.find((item) => [idOf(item, "artifact_id", "id"), idOf(item, "artifact_contract_id")].includes(id)) ?? null;
     return contract || registry || payload ? { contract, registry, payload } : null;
   }
 }

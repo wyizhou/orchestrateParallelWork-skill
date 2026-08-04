@@ -538,6 +538,12 @@ export function staleDescendants(compiled, state, changedNodeId) {
   return descendants;
 }
 
+export function invalidateArtifactDescendants(compiled, state, artifactContractId) {
+  const contract = compiled.bundle.artifactCatalog.artifacts.find((item) => item.artifact_contract_id === artifactContractId);
+  if (!contract) throw new Error(`unknown artifact contract: ${artifactContractId}`);
+  return staleDescendants(compiled, state, contract.producer.node_id);
+}
+
 async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }

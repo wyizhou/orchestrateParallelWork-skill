@@ -1,24 +1,23 @@
 # orchestrate-parallel-work
 
-一个独立发布的 Agent Skill，用于判断复杂任务是否值得拆分，并在授权范围内组织隔离工作单元、分波次执行、统一集成和独立终验。
+一个基于 Graph Engineering 的 Agent Skill：把复杂目标编译为可审批的 DAG，用类型化 Task 与 Artifact 契约执行串行、并行或串并行工作，并通过本地实时 Dashboard 展示全过程。
 
 ## 核心亮点
 
-> **按工作单元动态选择当前平台支持的执行配置。**
+> **先看清整张执行图，再决定是否开始。**
 >
-> 它不会假设所有 Agent 拥有相同的模型、effort、推理、上下文或隔离接口。对每个工作单元，先遵守当前平台和项目规则，再从实际可用能力中选择**足够可靠的最轻量执行路径**。适合时继承父级配置；缺少安全的委派、并发或隔离能力时自动转为串行，不伪装已经并行。
+> Planner 会先生成 Agent Types、Nodes、Edges、Task Contracts 和 Artifact Contracts，验证 Graph 后输出数量、拓扑波次和深色 Dashboard。只有用户明确批准具体的 Plan ID、版本和 hash，执行才会开始。
 
 ## 主要优势
 
-- **不为了并行而并行**：简单任务直接完成；只有多个单元能够独立就绪、独立验收且不存在写入冲突时才并行。
+- **DAG 原生表达三种执行方式**：依赖链形成串行，互不依赖的 Ready Nodes 形成并行，fan-out/fan-in 形成串并行。
+- **批准门不可绕过**：初始“请完成”不等于批准尚未生成的 Graph；任何实质契约变化都会使旧批准失效。
+- **实时 Graph Dashboard**：零 npm 依赖的 Node.js 服务固定监听 [`http://127.0.0.1:8088`](http://127.0.0.1:8088)，展示 Graph、Tasks、Artifacts、Runs 和 Events；端口可显式覆盖。
+- **动态容量而非盲目启动**：`effective_capacity = min(15, 平台容量, 权限容量)`，并把 Coordinator、Workers 和 Validators 全部计入。
 - **按能力跨平台适配**：通用核心不绑定某个 Agent API；Codex 和 Claude Code 由独立适配层映射指令、上下文、委派、权限和 worktree 机制。
-- **授权边界清楚**：区分只需评估或方案、明确要求执行，以及接续已有工作的不同模式，不因拆分扩大任务范围或外部影响。
-- **先稳定共享基础**：多个单元依赖共同术语、接口、数据口径或安全边界时，先建立并验收最小共享基础。
-- **工作单元相互隔离**：每个单元都有唯一负责人、允许和禁止触碰的范围、预期产物、验证标准与失败回退，避免多个执行者同时修改同一资源。
-- **验证方式匹配任务类型**：代码使用测试、linter、类型检查和构建；数据使用断言、复算和口径核对；研究检查来源和证据；文档检查结构、引用与渲染。
-- **统一集成而非简单拼接**：单元通过验收后按依赖顺序集成，每接入一波都进行相关检查，及时发现接口、术语、数据和行为冲突。
-- **独立终验降低自检偏差**：由未参与实现、默认只读的 Validator 从用户目标出发复核最终成果，第一轮不预先获得实现者的自我评价或预期结论。
-- **能够处理变化与失败**：隔离失败结果，识别共享基础变化导致的过期结果，并根据实际情况重试、缩小范围、重新派发或转为串行。
+- **Node 交付有硬门**：每个 Node 默认必须提交业务 Artifact、测试证据和 lint 证据；预先批准的等价检查是唯一例外。
+- **事实型独立验证**：Validator 只接收功能点、模块、权威输入、Artifact 引用和检查步骤，不接收实现者总结、论证或导向性结论。
+- **可恢复和可审计**：不可变 Artifact 版本、Node Run Registry、批准记录与事件流共同保存完整血缘；上游变化会让下游结果显式 `stale`。
 
 ## 能做什么
 
@@ -31,22 +30,28 @@
 - 多章节报告、文档、内容生产与统一编辑。
 - 需要分阶段交付、集成检查和最终验收的项目。
 
-它会把复杂目标转换成边界清楚、依赖明确、互不冲突且可以独立验证的工作单元，最后整合为经过统一检查的完整成果。
+它会把复杂目标转换成边界清楚、依赖明确、互不冲突且可以独立验证的执行图，先交给用户审阅，再把已批准的图变成经过统一检查的完整成果。
 
 ## 工作流程
 
-1. **确认工作模式与授权**：判断用户只需要方案、要求直接执行，还是需要接续已有工作。
-2. **评估是否值得拆分**：检查复杂度、依赖、风险、协调成本和可隔离性，决定直接完成、先串行解耦或进入并行编排。
-3. **冻结目标契约**：明确目标、非目标、权威输入、约束、风险、验收标准、交付位置和集成负责人。
-4. **建立共享基础**：仅在多个单元共同依赖时建立术语、接口、数据、模板或安全边界，并先完成验收。
-5. **设计工作单元**：为每个单元指定负责人、隔离方式、输入快照、产物、验证证据、经当前平台能力核对的执行配置或父级继承、集成顺序和失败回退。
-6. **按依赖分波次执行**：只启动前置依赖已通过、输入稳定且没有写入冲突的单元，并持续维护状态和证据。
-7. **逐单元验收并统一集成**：验证通过后才能接入整体；每完成一波都运行相关集成检查。
-8. **独立终验与交付**：从原始目标出发复核端到端结果、边界情况、安全性、可回滚性和交付完整性。
+1. **编译计划**：冻结目标，规划 Agent Types、Nodes、Edges、Tasks、Artifacts、范围、验证门和终端产物。
+2. **静态验证**：拒绝循环、悬空引用、端口不匹配、重复生产者、同波次写入冲突和不完整验证门。
+3. **展示并等待**：输出角色、Node、Edge、Task、Artifact 数量和拓扑波次，启动 Dashboard，然后进入 `awaiting_user_approval`。
+4. **绑定批准**：只接受与当前 Plan ID、版本和 hash 匹配的明确批准。
+5. **动态调度**：在有效容量内释放依赖已接受、输入版本固定、范围不冲突的 Ready Nodes。
+6. **逐 Node 交付**：测试和 lint 证据通过后才能提交；Artifact 验收后才释放下游。
+7. **按图集成**：按拓扑顺序集成，持续同步 Registry、Events 与 Dashboard。
+8. **事实型终验**：由未参与实现的 Validator 独立检查功能点和模块，通过后完成计划。
 
 ## 文件
 
 - `skills/orchestrate-parallel-work/SKILL.md`：完整的 Skill 定义和执行规范。
+- `skills/orchestrate-parallel-work/assets/schemas/`：Graph、Task、Artifact、批准与运行状态的 JSON Schemas。
+- `skills/orchestrate-parallel-work/scripts/graphctl.mjs`：零依赖 Graph 编译与控制面工具。
+- `skills/orchestrate-parallel-work/scripts/dashboard-server.mjs`：只读 localhost Dashboard 服务。
+- `skills/orchestrate-parallel-work/assets/dashboard/`：深色 SVG Graph 前端资源。
+- `skills/orchestrate-parallel-work/references/graph-contracts.md`：Graph Engineering 契约与调度规则。
+- `skills/orchestrate-parallel-work/references/dashboard.md`：Dashboard 启动、同步和状态说明。
 - `skills/orchestrate-parallel-work/references/runtime-generic.md`：通用能力发现、上下文、权限和隔离规则。
 - `skills/orchestrate-parallel-work/references/runtime-codex.md`：Codex 平台适配。
 - `skills/orchestrate-parallel-work/references/runtime-claude-code.md`：Claude Code 平台适配。
@@ -62,7 +67,7 @@
 
 ## 安装
 
-需要可用的 Node.js 和 `npx` 环境。以下命令始终从仓库的 `main` 分支安装当前版本，不绑定 CLI 或 Skill 的版本号。
+需要可用的 Node.js 和 `npx` 环境。Dashboard 使用 Node.js 内置模块，不需要额外执行 `npm install`。以下命令始终从仓库的 `main` 分支安装当前版本，不绑定 CLI 或 Skill 的版本号。
 
 ### 全局安装
 
@@ -103,7 +108,7 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 
 If the skill is already installed, recursively compare the installed directory reported by `skills list` with the downloaded upstream payload. Compare file paths and file contents. If they are identical, do not reinstall or update anything. If they differ, run the same exact `skills add` command above to replace only `orchestrate-parallel-work`. Do not use `skills update`; the explicit `add` command also handles installations created with older repository layouts.
 
-After an installation or update, run `npx --yes skills list --global --agent <agent-id> --json` again and recursively compare the installed directory with the downloaded upstream payload. Confirm that there are no differences and that the installed copy contains `SKILL.md`, `references/runtime-generic.md`, `references/runtime-codex.md`, `references/runtime-claude-code.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`.
+After an installation or update, run `npx --yes skills list --global --agent <agent-id> --json` again and recursively compare the installed directory with the downloaded upstream payload. Confirm that there are no differences and that the installed copy contains `SKILL.md`, `scripts/graphctl.mjs`, `scripts/dashboard-server.mjs`, `assets/schemas/graph-plan.schema.json`, `assets/dashboard/index.html`, `references/graph-contracts.md`, `references/dashboard.md`, `references/runtime-generic.md`, `references/runtime-codex.md`, `references/runtime-claude-code.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`.
 
 Do not run, invoke, or otherwise execute the orchestration skill. Report whether the result was a new installation, an update caused by differing content, or no change because the content already matched. Include the installation path and verification result.
 ```

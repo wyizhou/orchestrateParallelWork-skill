@@ -5,7 +5,7 @@ Read this reference immediately before creating an executor or Validator, choosi
 ## Resolve policy and capabilities first
 
 1. Discover every instruction source that applies to the coordinator and the unit's exact work location. Follow the host runtime's precedence rules and the most specific applicable project rules.
-2. Inspect the capabilities actually exposed in the current session: delegated agents or sessions, context handoff modes, executor configuration, concurrency limits, permissions, background execution, and filesystem isolation.
+2. Inspect the capabilities actually exposed in the current session: delegated agents or sessions, context handoff modes, executor configuration, concurrency limits, permissions, background execution, filesystem isolation, and Node.js availability for the local Dashboard.
 3. Record the discovered capabilities, controlling instructions, and any missing capability in the unit contract. Do not assume a feature or parameter from another runtime exists.
 
 ## Choose the least-heavy sufficient execution path
@@ -13,6 +13,8 @@ Read this reference immediately before creating an executor or Validator, choosi
 Prefer the parent runtime configuration when it can satisfy the unit contract. Override a model, effort, reasoning, tool, permission, or sandbox setting only when the current host explicitly supports that field, applicable policy allows it, and the override materially improves reliability or cost.
 
 When no safe override exists, inherit the parent. When delegation, concurrency, or isolation is unavailable, execute the unit serially under the coordinator or return a plan; never pretend that parallel work occurred.
+
+For every scheduler tick, set `effective_capacity = min(15, runtime_capacity, permission_capacity)`. Count the top-level Planner/Coordinator and every active Worker or Validator. Do not count the localhost Dashboard process. Treat an unknown limit as unverified rather than as 15; reduce or serialize until the actual limit is known.
 
 For every launch, record:
 
@@ -38,6 +40,6 @@ For code work, resolve the accepted baseline before starting a unit. Use a nativ
 
 For non-code work, isolate owned files or sections, frozen data or evidence snapshots, queries, and external effects. If two ready units cannot be isolated, serialize them.
 
-Only the top-level coordinator launches, steers, waits for, or stops executors. Unit executors and Validators do not create nested workers. Before each wave, confirm that every requested launch fits current capacity and permission constraints; reduce the wave or serialize when it does not.
+Only the top-level coordinator launches, steers, waits for, or stops executors. Unit executors and Validators do not create nested workers. Before each wave, confirm that every requested launch fits the approved plan, current capacity, and permission constraints; reduce the wave or serialize when it does not.
 
 On capability, context, permission, capacity, or isolation failure, do not invent a substitute. Update the contract, inherit supported parent behavior, reduce or serialize the work, or surface the blocker.

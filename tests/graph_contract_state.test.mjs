@@ -15,6 +15,7 @@ import {
   computePlanHash,
   createExecutionState,
   effectiveCapacity,
+  invalidateArtifactDescendants,
   markReadyNodes,
   readyNodeIds,
   staleDescendants,
@@ -163,6 +164,51 @@ function hybridBundle() {
   return bundle;
 }
 
+function parallelBundle() {
+  const makeValidator = (id) => {
+    const task = taskBase(id, "validator", [
+      { port: "report", artifact_contract_ref: `${id}-report` },
+      { port: "test", artifact_contract_ref: `${id}-test` },
+      { port: "lint", artifact_contract_ref: `${id}-lint` },
+    ]);
+    task.validation_brief = {
+      validation_id: id,
+      feature_points: [],
+      modules: [],
+      authoritative_input_refs: ["request://original"],
+      artifact_refs: [],
+      verification_steps: ["Observe the assigned external facts"],
+    };
+    return task;
+  };
+  const tasks = [makeValidator("validate-left"), makeValidator("validate-right")];
+  return {
+    graphPlan: {
+      schema_version: "1.0",
+      plan_id: "plan-parallel",
+      plan_version: 1,
+      status: "awaiting_user_approval",
+      capacity: { hard_limit: 15, runtime_limit: 6, permission_limit: 6, effective_capacity: 6 },
+      nodes: tasks.map((task) => ({ node_id: task.node_id, node_type: "validation", agent_type_id: "validator", task_ref: task.task_id, input_ports: [], output_ports: ["report", "test", "lint"] })),
+      edges: [],
+      terminal_outputs: tasks.map((task) => `${task.task_id}-report`),
+    },
+    agentTypes: {
+      schema_version: "1.0",
+      agent_types: [{ agent_type_id: "validator", title: "Validator", purpose: "Observe declared facts", capabilities: ["validation"], allowed_tools: ["read", "test"], permission_profile: "read-only", default_owned_scopes: [], max_instances: 2, validator: true }],
+    },
+    tasks,
+    artifactCatalog: {
+      schema_version: "1.0",
+      artifacts: tasks.flatMap((task) => [
+        artifact(`${task.task_id}-report`, task.task_id, "report", "delivery"),
+        artifact(`${task.task_id}-test`, task.task_id, "test", "evidence"),
+        artifact(`${task.task_id}-lint`, task.task_id, "lint", "evidence"),
+      ]),
+    },
+  };
+}
+
 test("compiler accepts a complete approval-gated serial DAG and derives counts", () => {
   const bundle = validBundle();
   const compiled = compileBundle(bundle);
@@ -181,6 +227,13 @@ test("DAG topology naturally compiles a hybrid parallel-then-serial plan", () =>
   assert.equal(compiled.summary.estimated_peak_agents, 3);
   assert.equal(compiled.summary.node_count, 3);
   assert.equal(compiled.summary.planned_artifact_count, 9);
+});
+
+test("independent validation nodes compile as a pure parallel plan", () => {
+  const compiled = compileBundle(parallelBundle());
+  assert.deepEqual(compiled.topology.waves, [["validate-left", "validate-right"]]);
+  assert.equal(compiled.summary.execution_shape, "parallel");
+  assert.equal(compiled.summary.estimated_peak_agents, 3);
 });
 
 test("canonical hash ignores lifecycle and derived fields but covers contracts", () => {
@@ -331,6 +384,16 @@ test("state engine rejects illegal transitions and stales transitive descendants
   state.nodes.validate.status = "accepted";
   assert.deepEqual(staleDescendants(compiled, state, "build"), ["validate"]);
   assert.equal(state.nodes.validate.status, "stale");
+});
+
+test("an artifact contract change invalidates all transitive consumer nodes", () => {
+  const compiled = compileBundle(validBundle());
+  const state = createExecutionState(compiled);
+  state.nodes.build = { status: "accepted", attempt: 1 };
+  state.nodes.validate = { status: "accepted", attempt: 1 };
+  assert.deepEqual(invalidateArtifactDescendants(compiled, state, "build-result"), ["validate"]);
+  assert.equal(state.nodes.validate.status, "stale");
+  assert.throws(() => invalidateArtifactDescendants(compiled, state, "missing"), /unknown artifact contract/);
 });
 
 test("CLI validates a file-backed plan and emits deterministic JSON", async () => {

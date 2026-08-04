@@ -8,11 +8,11 @@ import { createDashboardServer, parseArgs } from "../skills/orchestrate-parallel
 
 async function runFixture() {
   const directory=await mkdtemp(path.join(tmpdir(),"graph-dashboard-http-"));
-  await Promise.all(["tasks","artifact-contracts","artifacts"].map((name)=>mkdir(path.join(directory,name))));
-  await writeFile(path.join(directory,"graph-plan.json"),JSON.stringify({nodes:[{id:"task-1",agent_type:"developer"}],edges:[]}));
+  await Promise.all(["tasks","artifacts","artifact-payloads"].map((name)=>mkdir(path.join(directory,name))));
+  await writeFile(path.join(directory,"graph-plan.json"),JSON.stringify({nodes:[{node_id:"task-1",task_ref:"task-1",agent_type_id:"developer"}],edges:[]}));
   await writeFile(path.join(directory,"state.json"),JSON.stringify({revision:7,phase:"awaiting_user_approval"}));
   await writeFile(path.join(directory,"tasks/task.json"),JSON.stringify({task_id:"task-1",goal:"A <script> stays text"}));
-  await writeFile(path.join(directory,"artifact-contracts/a.json"),JSON.stringify({artifact_id:"artifact-1",artifact_type:"report"}));
+  await writeFile(path.join(directory,"artifacts/catalog.json"),JSON.stringify({artifacts:[{artifact_contract_id:"artifact-1",artifact_type:"report"}]}));
   return directory;
 }
 

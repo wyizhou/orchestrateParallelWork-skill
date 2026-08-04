@@ -1,29 +1,50 @@
-# Task-type validation and independent validation
+# Task delivery gates and fact-only independent validation
 
-Read this reference before freezing a unit's verification plan and again before arranging or evaluating independent final validation.
+Read this reference while compiling every Task Contract and again before accepting a Node or launching a Validator.
 
-## Match checks to the change
+## Require two self-check gates
 
-State observable behavior, exact commands or reproducible steps, pass/fail conditions, and evidence to return. Reuse relevant project checks; follow applicable `AGENTS.md`; do not add tests merely as ceremony.
+Every executable Node declares both a test gate and a lint gate before approval. Each gate records reproducible steps, pass conditions, and an evidence Artifact Contract. A conventional command is preferred; when it is genuinely inapplicable, declare an equivalent check, reason, steps, pass condition, and evidence in the plan so the user approves the exception.
 
-| Task type | Minimum relevant evidence |
-| --- | --- |
-| Software | Run focused behavior/regression tests; run type, lint, build, package, or integration checks when the change makes each applicable. |
-| Data analysis | Run data assertions and key-result recomputation; reconcile sources and inspect missing values, anomalies, denominators, and metric definitions. |
-| Research / information analysis | Verify source authenticity, map citations to claims, cross-check key facts, and assess evidence completeness without prescribing a conclusion. |
-| Documentation / content | Check structure, terminology, links, citations, rendering, and an appropriate sample review. |
-| Operations / audit / process | Prefer dry-runs, before/after state comparison, permission checks, and rollback verification. |
+Execution Agents cannot add, weaken, skip, or reinterpret an exception. A gate that is missing, not run, failed, or lacks raw evidence prevents `submitted`, `accepted`, and downstream release.
 
-When no automated check exists, specify a reproducible manual procedure and preserve its raw evidence. Make shared fixtures or acceptance tools a shared-foundation unit with one writer.
+| Task type | Test gate | Lint gate or equivalent |
+| --- | --- | --- |
+| Software | Focused behavior/regression tests | Applicable lint, type, build, package, or static check |
+| Data | Assertions and key-result recomputation | Schema, missing-value, anomaly, denominator, and definition checks |
+| Research | Key-fact cross-check and source reproduction | Source authenticity, citation mapping, and evidence-completeness check |
+| Documentation | Render or sample-review procedure | Structure, terminology, link, citation, and format check |
+| Operations | Dry-run and before/after assertion | Permission, configuration, rollback, and audit check |
 
-## Preserve independent validation
+Store the exact command or step, exit code or observation, timestamp, result, and evidence reference. Completion prose is never evidence.
 
-After integration, use a Validator who did not implement the work and defaults to read-only. Give the first pass only:
+## Generate a fact-only Validator brief
 
-- the original user goal, frozen overall contract, and acceptance criteria;
-- authoritative inputs and the final integrated artifact; and
-- the minimum interfaces, data definitions, boundaries, and steps needed to check it.
+Generate Validator input from approved contracts, never from implementer or coordinator narrative. Permit only:
 
-Withhold implementer reports, coordinator conclusions, hoped-for answers, suspected defects, and repair narratives until that first pass concludes. Permit direct inspection of raw evidence when necessary, but never treat completion reports as evidence.
+- feature point IDs and factual expected behavior;
+- module names and paths;
+- authoritative input references;
+- Artifact references; and
+- reproducible verification steps.
 
-Ask the Validator to report reproducible evidence, failed checks, coverage gaps, and unresolved risk; prohibit it from changing deliverables. Route repairs through the coordinator, then rerun affected checks and a targeted independent recheck. If a separate Validator is impossible, perform the same protocol yourself and disclose the lack of independence.
+Reject extra prose or fields containing implementation summaries, self-assessments, rationale, recommendations, expected conclusions, suspected defects, known-issue steering, or repair narratives. Do not give the Validator another Agent's conclusion or claimed test status before its blind first pass.
+
+The Validator must not be an Agent instance that produced an Artifact under test. It defaults to read-only, cannot delegate, and cannot fix the deliverable.
+
+## Require factual Validator output
+
+For each checked feature/module, require:
+
+```text
+Feature ID and module:
+Status:
+Verification command or step:
+Exit code when applicable:
+Expected fact:
+Observed fact:
+Evidence reference:
+Coverage gap, if any:
+```
+
+Route failures to the Coordinator. After repair, rerun affected self-checks, integration checks, and a targeted independent recheck. Mark the plan complete only when terminal deliverables and required Validator nodes are accepted.

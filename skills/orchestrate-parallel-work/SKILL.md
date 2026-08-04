@@ -1,105 +1,109 @@
 ---
 name: orchestrate-parallel-work
-description: 把具有多个可独立验证工作流、依赖关系或写入面的复杂目标拆成隔离单元；必要时先交付共享基础，再分波次执行、统一集成和独立终验。Use when an AI agent runtime must plan or coordinate genuinely multi-part work involving task decomposition, workstreams, branches or worktrees, delegated agents, staged integration, or cross-unit validation. Do not use for small single-output tasks or ordinary validation with no parallel workstreams.
+description: 把复杂目标编译为可审批、可追踪的 DAG，使用类型化 Task 和 Artifact 契约执行串行、并行或串并行工作，并通过独立事实验证后交付。Use when an AI agent runtime must plan or execute genuinely multi-part work with dependency graphs, delegated roles, staged artifacts, localhost visualization, approval gates, isolated workstreams, or cross-unit validation. Do not use for small single-output tasks or ordinary validation without multiple schedulable units.
 ---
 
 # Orchestrate Parallel Work
 
-把并行当作依赖关系的结果。先固定共同基础与单元契约，只并行互不阻塞的单元；由协调者集成，并由未参与实现者终验。
+把复杂工作视为经契约编译的有向无环图。先规划角色、Node、Edge、Task 和 Artifact，展示完整 Graph 并等待用户批准；只执行获批版本，按依赖释放工作，并以事实型独立验证完成交付。
 
 ## Guardrails
 
-1. 不因拆分扩大用户授权、任务范围或外部影响。
-2. 不让两个执行者写同一资源；无法隔离时串行。
-3. 不把未稳定的共享决策交给多个单元猜测。
-4. 不以单元完成替代整体通过；必须集成并终验。
+1. 不因拆分扩大用户授权、目标范围、写入面或外部影响。
+2. 编排后必须停止；没有用户对具体 `plan_id`、`plan_version` 和 `plan_hash` 的明确批准，不启动执行者或 Validator。
+3. 不让两个活动 Node 写同一资源；无法隔离时增加依赖并串行。
+4. 每个 Node 恰好绑定一个可独立交付、重试和验证的 Task Contract。
+5. 每个 Node 交付前必须通过预先声明的测试与 lint 门，或用户随计划批准的等价检查。
+6. 不以自检或 Agent 完成声明替代独立验证和整体通过。
 
 ## 1. Confirm the operating mode
 
-- 用户只要求评估、拆解、计划或分工时，只交付编排方案；不要创建执行者、分支、worktree 或外部变更。
-- 用户明确要求完成、实现或交付时，在既有授权内执行正常步骤。
-- 用户要求协调已有工作时，先读取实际状态；不要重复派发已完成或活跃的单元。
+- 用户只要求分析或计划时，生成并展示计划，不执行计划。
+- 用户要求实现或完成时，仍先生成计划并进入批准门；初始执行请求不等于批准尚未生成的计划。
+- 用户要求继续已批准的运行时，读取实际控制面和批准记录，只继续匹配的未完成版本。
+- 小而明确、单一产物且单一写入面的请求不使用本 Skill；直接完成。
 
-遇到会实质改变结果的缺失决策时请求用户决定；其余低风险细节采用可撤销假设并记录。
+批准前只允许在隔离的 `.orchestration/runs/<run-id>/` 中创建控制面文件并启动只读 localhost Dashboard。不要修改目标实现、创建执行 worktree、启动 Worker/Validator，或产生业务外部影响。
 
-## 2. Decide whether to decompose
+## 2. Compile the graph plan
 
-- 对小而明确、单一产物、单一写入面的任务直接完成。
-- 对多个可独立验证的结果、专业分工或耗时工作流拆成单元。
-- 对共享模型、术语、数据、接口、模板或安全边界，先建立最小共享基础。
-- 对高度耦合、写入冲突或未澄清依赖，先串行消除耦合。
+在编排前读取 [Graph、Task、Artifact 与运行状态契约](references/graph-contracts.md)、[任务交付门与事实型独立验证](references/validation.md)，以及适用的运行时适配。
 
-仅当至少两个单元可在同一波次独立就绪、分别验收、没有写入冲突且并行收益高于协调成本时并行。把分支理解为隔离工作流：代码使用分支和 worktree；研究、分析或文档使用独立上下文、证据集或章节所有权。
+由顶层 Planner/Coordinator：
 
-## 3. Freeze the goal and shared foundation
+1. 冻结目标、非目标、权威输入、约束、权限、写入范围、整体验收和终端产物。
+2. 规划可复用的 Agent Type；必须包含只读、不可修复产物的 Validator 类型。
+3. 建立 DAG。Node 是最小可交付单元；Edge 绑定来源输出端口和目标输入端口，数据身份使用 Artifact Contract 而不是文件名。
+4. 为每个 Node 生成一个 Task Contract，并声明输入、输出、功能点、模块、边界、测试、lint、验收和失败策略。
+5. 建立 Artifact Catalog；包含业务产物以及每个 Node 的测试和 lint 证据产物。
+6. 计算串行、并行或串并行拓扑波次，并检查同波次写入与外部影响冲突。
+7. 从本 Skill 目录解析脚本路径，使用 `node <skill-dir>/scripts/graphctl.mjs validate <plan-directory>` 编译并验证完整契约目录。不要执行未通过编译的 Graph。
 
-在派发前冻结总目标契约：目标、明确不做的内容、权威输入与快照、约束和授权边界、整体验收标准、交付位置与集成负责人。
+V1 只允许 DAG。用新 attempt 表示重试，用新计划版本表示结构、范围或契约变化；不要用任意循环隐藏终止条件。
 
-仅在多个单元依赖相同事实时建立共享基础，例如术语、接口、数据口径、目录骨架、夹具、权限边界或集成规则。使基础可验证、可交付、可回滚；验收后让下游从同一确认快照开始。
+## 3. Materialize and show the control plane
 
-## 4. Specify each work unit
+在运行目录落地 Graph、Agent Type、Task 和 Artifact 契约，用 `graphctl.mjs summary <plan-directory> --json`复核派生统计，并按 [localhost Dashboard](references/dashboard.md) 使用 `<skill-dir>/scripts/dashboard-server.mjs` 启动只读页面。Dashboard 默认绑定 `127.0.0.1:8088`；它不是 Agent，不占用 Agent 容量。
 
-为每个单元记录以下契约：
-
-```text
-ID / 名称：
-目的与完成定义：
-依赖、共享基础版本与起始基线 SHA：
-负责范围、禁止范围与唯一负责人：
-分支 / workdir（或其他隔离方式）：
-允许的工具与外部影响：
-适用的指令来源与优先级：
-可用的委派、上下文、隔离与并发能力：
-执行配置或父级继承、可用性与选择理由：
-上下文交接策略：
-预期产物、验收标准与验证证据：
-集成顺序、失败回退与对下游影响：
-```
-
-仅在输入稳定、输出可单独检查、同波次无写入冲突、失败可隔离且合并后有完整价值时独立派发。为每个单元冻结任务匹配的验证计划；不要预设研究、分析或独立验证应得出的结论。
-
-**在冻结验证计划，以及安排或审查独立终验之前，读取 [任务类型验证与独立终验](references/validation.md)。**
-
-## 5. Select isolation and runtime
-
-为代码任务固定集成基线；在共享基础通过后，从同一集成提交创建单元分支和 worktree。每个执行者只写其指定 worktree，先向集成分支交付，再统一面向正式基线交付。对非代码工作，冻结输入快照并隔离上下文、证据、查询或章节所有权。
-
-**在创建任何执行者或 Validator、选择执行配置、设置上下文、创建 worktree，或检查并发容量之前，读取 [通用运行时与隔离规则](references/runtime-generic.md)。当宿主为 Codex 时再读取 [Codex 适配](references/runtime-codex.md)；当宿主为 Claude Code 时再读取 [Claude Code 适配](references/runtime-claude-code.md)。其他运行时仅使用通用规则和已验证的实际能力。**
-
-只有用户或上级规则允许时，才创建子 Agent、分支、worktree、外部消息或真实系统变更。
-仅顶层协调者可创建、跟进或终止执行者；单元执行者和 Validator 不得继续嵌套委派。
-
-## 6. Execute in dependency waves
-
-维护依赖图和状态：`blocked → ready → active → submitted → accepted → integrated`；用 `failed` 标记失败，用 `stale` 标记共享基础改变后失效的结果。先验收所有前置依赖，再启动一个单元。
-
-启动前确认：契约和输入快照已固定、同波次无冲突、验证与失败路径可执行、运行时能力和并发容量足够、协调者能处理反馈与集成。给执行者最小完整上下文：总目标、单元契约、共享基础版本、必要原始材料和交付格式；对独立判断单元不要泄漏其他单元的预期结论。
-
-要求每个单元交回：
+向用户同时交付聊天摘要和 Dashboard 地址。摘要必须包含：
 
 ```text
-完成内容：
-产物位置或提交：
-运行的验证与结果证据：
-未运行的适用检查及原因：
-假设、偏差与未解决问题：
-对后续单元或集成的影响：
+Plan ID / Version / Hash:
+Agent 角色类型数 / 预计峰值 Agents:
+Node 数 / Edge 数:
+Task 数:
+计划 Artifact 数 / 已生成 Artifact 数（批准前必须为 0）:
+有效容量与预计峰值:
+执行形态与拓扑波次:
+测试、lint 等价检查或其他批准例外:
+写入范围与外部影响:
+Dashboard URL:
 ```
 
-隔离失败、超时或越界结果；仅在输入和契约仍有效时重试。否则缩小契约、串行处理或建立新共享基础快照后重新派发。
+Graph 视图必须显示每个 Node 和 Edge；Edge 标出传递的 Artifact。然后把计划状态设为 `awaiting_user_approval`，停止并请求用户批准这个确定版本。
 
-## 7. Accept and integrate
+## 4. Enforce approval and capacity
 
-直接检查产物和可复现证据；“已完成”不是证据。只有规定验证通过，才能标记 `accepted`。由协调者按依赖顺序集成，每接入一波就运行相关集成检查。
+只接受与当前 `plan_id`、`plan_version` 和规范化内容 hash 完全匹配的明确批准。角色、Node、Edge、Task、Artifact、范围、外部影响、验证例外或并发上限增加发生变化时，使旧批准失效、递增版本并重新展示。
 
-共享基础改变时，停止受影响单元、形成新快照并重新派发；不要静默漂移契约。代码任务仅由集成分支面向正式基线交付。只在已合并、无未保存产物且授权允许时清理隔离资源。
+运行时容量降低只会缩小波次或转为串行；告知用户但不改变任务契约。每次调度计算：
 
-## 8. Validate independently
+```text
+effective_capacity = min(15, runtime_capacity, permission_capacity)
+```
 
-在集成检查后，安排未参与实现且默认只读的 Validator，从用户目标出发复现关键证据、检查端到端结果、边界与安全/回滚要求，以及单元组合后的冲突、遗漏和漂移。第一轮只提供原始目标、冻结契约与验收标准、权威输入、最终集成产物和必要检查方法；完成后才提供已知风险或修复信息进行定向复验。
+容量包含顶层 Planner/Coordinator、活动 Worker 和 Validator；Dashboard 进程不计入。未知容量不得按15推断：发现实际能力，无法验证时串行协调或报告限制。
 
-禁止 Validator 直接修改产物；由协调者组织修复和复验。无法独立复核时，由协调者执行同样的检查并在交付中说明限制。
+## 5. Execute approved nodes
 
-## 9. Report
+在每次 scheduler tick 检查批准仍有效。只有所有前置 Node 已 `accepted`、必需 Artifact 版本和 digest 已固定、写入面可隔离且有容量时，Node 才从 `blocked` 进入 `ready`。
 
-先简洁报告依赖图、波次和验收门；进入派发或用户要求时再展开单元契约。说明共享基础及版本、各单元状态、单元/集成/独立验证证据，以及未完成项、风险、偏差和下一步。
+只由顶层 Coordinator 创建、跟进或终止执行者；执行者和 Validator 不得嵌套委派。给执行者自包含的 Task Contract、确切输入 Artifact、工作目录、允许和禁止范围及验证命令。代码工作使用独立分支/worktree；非代码工作隔离文件、章节、查询、证据或外部影响。
+
+要求每个 Node 返回实际产物及原始证据。测试或 lint 未运行、失败或缺少证据时，Node 不得进入 `submitted`、不得注册 accepted Artifact、不得释放下游。只接受计划中已批准的等价检查；执行者不能临时豁免。
+
+状态使用：
+
+```text
+blocked → ready → active → submitted → accepted → integrated
+```
+
+并使用 `failed`、`stale`、`skipped`、`cancelled` 表示旁路状态。上游 Artifact 版本或 digest 改变时，把所有传递依赖者标记为 `stale`，隔离活动后代并用新 attempt 重验。
+
+## 6. Register artifacts and integrate
+
+Artifact Catalog 是批准前的计划契约；Artifact Registry 只登记实际版本、生产 Node/run/attempt/Agent、相对 URI、文件、digest、状态和验证证据。重试创建新版本，不覆盖已接受历史。
+
+由 Coordinator 作为控制面的单一写入者原子更新 Registry、Node Run Registry、批准记录和事件。执行者只写其隔离交付面。按拓扑顺序集成已接受 Node；每一波后运行相关集成检查。
+
+## 7. Validate facts independently
+
+每个功能点和模块至少映射到一个未参与其实现的 Validator。Validator 第一轮只接收结构化事实白名单：功能点及预期行为、模块及路径、权威输入引用、Artifact 引用和可复现检查步骤。
+
+不要向 Validator 提供实现者总结、自评、论证、推荐结论、预期结论、已知缺陷导向或修复叙事。Validator 默认只读，只输出 expected/observed、命令或步骤、退出码、状态、证据和覆盖缺口；不得修改产物。
+
+Validator 未通过时由 Coordinator 创建修复 attempt，并在修复后进行定向复验。独立性不可用时，必须在计划中作为例外获得批准并在最终交付披露。
+
+## 8. Report and close
+
+保持 Dashboard 与落地的 Graph、Task、Artifact、Registry 和事件同步。最终报告批准版本、实际波次与峰值、Node 状态、Artifact 版本、测试/lint/集成/独立验证证据、偏差、未解决风险和 Dashboard 状态。只有终端产物集成且独立验证通过，计划才能标记 `completed`。

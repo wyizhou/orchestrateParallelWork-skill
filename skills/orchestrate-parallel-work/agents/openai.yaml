@@ -1,4 +1,4 @@
 interface:
-  display_name: "并行任务编排"
-  short_description: "跨平台拆分复杂工作，安全执行、集成和独立验收"
-  default_prompt: "Use $orchestrate-parallel-work to decide whether this task benefits from decomposition, adapt execution to the current agent runtime, and require verification evidence before integrating independent work units."
+  display_name: "Graph 任务编排"
+  short_description: "将复杂目标编译为可审批、可视化并独立验证的执行图"
+  default_prompt: "Use $orchestrate-parallel-work to compile this complex goal into an approval-gated task and artifact graph, show the local dashboard, and execute only the exact plan I approve."

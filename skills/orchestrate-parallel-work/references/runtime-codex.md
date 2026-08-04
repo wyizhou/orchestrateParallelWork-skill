@@ -18,7 +18,7 @@ Subagents inherit parent permission and sandbox constraints unless the current i
 
 ## Delegation and isolation
 
-Use Codex subagents only from the top-level coordinator. Check live thread capacity before every wave and reserve enough coordinator capacity to integrate and validate results.
+Use Codex subagents only from the top-level coordinator. Check live thread capacity before every scheduler tick, include the coordinator and Validators in the effective-capacity count, and reserve enough coordinator capacity to integrate and validate results. Never exceed the approved capacity even when Codex exposes more slots.
 
 For write-heavy code units, create separate branches and worktrees from the accepted integration baseline unless the current Codex surface already provides an equivalent verified isolation mechanism. Pass each executor the exact absolute workdir and branch, and prohibit writes to the coordinator checkout.
 

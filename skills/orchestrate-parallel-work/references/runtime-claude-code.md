@@ -16,7 +16,7 @@ Background subagents cannot complete actions that would require a new interactiv
 
 ## Delegation and isolation
 
-Only the main Claude Code conversation coordinates work. Subagents do not spawn other subagents. Use focused subagents for independent units that report results to the coordinator.
+Only the main Claude Code conversation coordinates work. Subagents do not spawn other subagents. Use focused subagents for independent units that report results to the coordinator. Count the main conversation and every active subagent or Validator against the approved effective capacity.
 
 For code-writing units, prefer native `isolation: worktree` when it starts from the accepted baseline and preserves the unit boundary. Claude Code worktree isolation may use a default-branch baseline rather than the parent session's current `HEAD`; verify the actual baseline before launch. If it is unsuitable, create and assign a manual worktree from the accepted integration commit or serialize the unit.
 

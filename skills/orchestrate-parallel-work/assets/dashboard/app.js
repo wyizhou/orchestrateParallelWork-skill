@@ -45,8 +45,8 @@ function layout(nodes, edges) {
   const incoming = new Map(nodes.map((node) => [node.id, 0]));
   const outgoing = new Map(nodes.map((node) => [node.id, []]));
   for (const edge of edges) {
-    const from = String(edge.from?.node ?? edge.from ?? "");
-    const to = String(edge.to?.node ?? edge.to ?? "");
+    const from = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? "");
+    const to = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
     if (ids.has(from) && ids.has(to)) { incoming.set(to, incoming.get(to) + 1); outgoing.get(from).push(to); }
   }
   const levels = new Map();
@@ -79,19 +79,19 @@ function drawGraph(graph) {
   const marker = svgElement("marker", { id:"arrow", viewBox:"0 0 10 10", refX:"9", refY:"5", markerWidth:"6", markerHeight:"6", orient:"auto-start-reverse" });
   marker.append(svgElement("path", { d:"M 0 0 L 10 5 L 0 10 z", fill:"#64748b" })); defs.append(marker); svg.append(defs);
   for (const edge of edges) {
-    const fromId = String(edge.from?.node ?? edge.from ?? ""), toId = String(edge.to?.node ?? edge.to ?? "");
+    const fromId = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? ""), toId = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
     const from = positions.get(fromId), to = positions.get(toId); if (!from || !to) continue;
     const line = svgElement("path", { class:`edge ${edge.status ?? "waiting"}`, d:`M ${from.x + 180} ${from.y + 42} C ${from.x + 220} ${from.y + 42}, ${to.x - 40} ${to.y + 42}, ${to.x} ${to.y + 42}`, tabindex:"0" });
     line.addEventListener("click", () => {
-      const artifactId = String(edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");
-      const artifact = snapshot.artifact_contracts.find((item) => idOf(item,"artifact_id","id") === artifactId);
+      const artifactId = String(edge.artifact_contract_ref ?? edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");
+      const artifact = snapshot.artifact_contracts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id") === artifactId);
       openDrawer(`Edge ${fromId} → ${toId}`, { edge, artifact });
     }); svg.append(line);
   }
   for (const node of nodes) {
     const point = positions.get(node.id), group = svgElement("g", { class:`node ${node.status ?? "planned"}`, transform:`translate(${point.x} ${point.y})`, tabindex:"0", role:"button" });
-    group.append(svgElement("rect", { width:"180", height:"84" }), svgElement("text", { x:"14", y:"27" }, node.id), svgElement("text", { x:"14", y:"48", class:"role" }, node.agent_type ?? node.agent_role ?? "unassigned"), svgElement("text", { x:"14", y:"69", class:"badge" }, `test:${node.test_status ?? "–"}  lint:${node.lint_status ?? "–"}  validator:${node.validator_status ?? "–"}`));
-    const show = () => { const taskId = String(node.task_id ?? node.id); openDrawer(node.id, { node, task: snapshot.tasks.find((task) => idOf(task,"task_id","id") === taskId), run: snapshot.node_runs.find((run) => idOf(run,"node_id","task_id","id") === node.id) }); };
+    group.append(svgElement("rect", { width:"180", height:"84" }), svgElement("text", { x:"14", y:"27" }, node.id), svgElement("text", { x:"14", y:"48", class:"role" }, node.agent_type_id ?? node.agent_type ?? node.agent_role ?? "unassigned"), svgElement("text", { x:"14", y:"69", class:"badge" }, `test:${node.test_status ?? "–"}  lint:${node.lint_status ?? "–"}  validator:${node.validator_status ?? "–"}`));
+    const show = () => { const taskId = String(node.task_ref ?? node.task_id ?? node.id); openDrawer(node.id, { node, task: snapshot.tasks.find((task) => idOf(task,"task_id","id") === taskId), run: snapshot.node_runs.find((run) => idOf(run,"node_id","task_id","id") === node.id) }); };
     group.addEventListener("click", show); group.addEventListener("keydown", (event) => { if (["Enter"," "].includes(event.key)) show(); }); svg.append(group);
   }
 }
@@ -99,16 +99,16 @@ function drawGraph(graph) {
 function render(value) {
   snapshot = value;
   const summary = $("#summary"); summary.replaceChildren();
-  const metrics = [["Agent roles",value.counts.agent_roles],["Agent instances",value.counts.agent_instances],["Nodes",value.counts.nodes],["Edges",value.counts.edges],["Tasks",value.counts.tasks],["Planned artifacts",value.counts.planned_artifacts],["Generated artifacts",value.counts.generated_artifacts],["Capacity",`${value.capacity.effective}/15`],["Phase",value.phase]];
+  const metrics = [["Agent roles",value.counts.agent_roles],["Active agents",value.counts.agent_instances],["Nodes",value.counts.nodes],["Edges",value.counts.edges],["Tasks",value.counts.tasks],["Planned artifacts",value.counts.planned_artifacts],["Generated artifacts",value.counts.generated_artifacts],["Capacity",value.capacity.effective === null ? "unknown" : `${value.capacity.effective}/15`],["Phase",value.phase]];
   for (const [label, metric] of metrics) { const card=element("div",{class:"metric"}); card.append(element("strong",{},metric),element("span",{},label)); summary.append(card); }
   drawGraph(value.graph);
   cards($("#tasks"), value.tasks, (item) => item);
-  const artifactIds = new Set([...value.artifact_contracts, ...value.artifact_registry, ...value.artifacts].map((item) => idOf(item,"artifact_id","id")));
+  const artifactIds = new Set([...value.artifact_contracts, ...value.artifact_registry, ...value.artifacts].map((item) => idOf(item,"artifact_contract_id","artifact_id","id")));
   const artifacts = [...artifactIds].map((id) => ({
-    ...(value.artifact_contracts.find((item) => idOf(item,"artifact_id","id")===id) ?? {}),
+    ...(value.artifact_contracts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? {}),
     artifact_id:id,
-    registry:value.artifact_registry.find((item) => idOf(item,"artifact_id","id")===id) ?? null,
-    payload:value.artifacts.find((item) => idOf(item,"artifact_id","id")===id) ?? null,
+    registry:value.artifact_registry.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? null,
+    payload:value.artifacts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? null,
   }));
   cards($("#artifacts"), artifacts, (item) => item);
   cards($("#runs"), value.node_runs, (item) => item);

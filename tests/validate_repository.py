@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free structural and behavioral-manifest validation for this skill."""
+"""Dependency-free repository, documentation, and skill-payload validation."""
 
 from __future__ import annotations
 
@@ -10,232 +10,248 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-README_FILE = ROOT / "README.md"
-SKILL_DIR = ROOT / "skills" / "orchestrate-parallel-work"
-SKILL_FILE = SKILL_DIR / "SKILL.md"
-OPENAI_FILE = SKILL_DIR / "agents" / "openai.yaml"
-LICENSE_FILE = SKILL_DIR / "LICENSE"
-GENERIC_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-generic.md"
-CODEX_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-codex.md"
-CLAUDE_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-claude-code.md"
-VALIDATION_FILE = SKILL_DIR / "references" / "validation.md"
-CASES_FILE = ROOT / "tests" / "cases.json"
-STALE_LITERALS = ("gpt-5.6-luna", "light")
-CORE_PLATFORM_LITERALS = ("AGENTS.md", "CLAUDE.md", "fork_turns", "isolation: worktree")
-MAIN_SKILL_URL = (
-    "https://github.com/wyizhou/orchestrateParallelWork-skill/"
-    "tree/main/skills/orchestrate-parallel-work"
+SKILL = ROOT / "skills" / "orchestrate-parallel-work"
+README = ROOT / "README.md"
+SKILL_MD = SKILL / "SKILL.md"
+OPENAI = SKILL / "agents" / "openai.yaml"
+CASES = ROOT / "tests" / "cases.json"
+PACKAGE = ROOT / "package.json"
+MAIN_URL = "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work"
+GLOBAL_ADD = f'npx --yes skills add "{MAIN_URL}" --agent codex claude-code --global --yes'
+PROJECT_ADD = f'npx --yes skills add "{MAIN_URL}" --agent codex claude-code --yes'
+
+SCHEMAS = (
+    "agent-types.schema.json",
+    "approval.schema.json",
+    "artifact-catalog.schema.json",
+    "artifact-registry.schema.json",
+    "graph-plan.schema.json",
+    "node-run-registry.schema.json",
+    "task-contract.schema.json",
 )
-GLOBAL_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex claude-code --global --yes'
-PROJECT_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex claude-code --yes'
 
+REQUIRED = (
+    README,
+    SKILL_MD,
+    OPENAI,
+    SKILL / "LICENSE",
+    PACKAGE,
+    CASES,
+    SKILL / "scripts" / "graph-core.mjs",
+    SKILL / "scripts" / "graphctl.mjs",
+    SKILL / "scripts" / "dashboard-state.mjs",
+    SKILL / "scripts" / "dashboard-server.mjs",
+    SKILL / "assets" / "dashboard" / "index.html",
+    SKILL / "assets" / "dashboard" / "styles.css",
+    SKILL / "assets" / "dashboard" / "app.js",
+    SKILL / "references" / "graph-contracts.md",
+    SKILL / "references" / "dashboard.md",
+    SKILL / "references" / "runtime-generic.md",
+    SKILL / "references" / "runtime-codex.md",
+    SKILL / "references" / "runtime-claude-code.md",
+    SKILL / "references" / "validation.md",
+) + tuple(SKILL / "assets" / "schemas" / name for name in SCHEMAS)
 
-def fail(errors: list[str], message: str) -> None:
-    errors.append(message)
+CASE_IDS = {
+    "single-output-no-graph",
+    "plan-only-no-execution",
+    "initial-execute-request-still-awaits-approval",
+    "approval-binds-plan-identity",
+    "material-change-invalidates-approval",
+    "serial-dag",
+    "parallel-dag",
+    "hybrid-fan-out-join",
+    "effective-capacity-hard-limit",
+    "unknown-capacity-no-assumption",
+    "write-conflict-serializes",
+    "node-task-one-to-one",
+    "node-delivery-gates",
+    "approved-equivalent-check",
+    "fact-only-validator-input",
+    "validator-independent-read-only",
+    "artifact-version-stales-descendants",
+    "dashboard-loopback-read-only",
+    "dashboard-state-from-files",
+    "platform-rules-win",
+}
 
 
 def read(path: Path, errors: list[str]) -> str:
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        fail(errors, f"cannot read {path.relative_to(ROOT)}: {exc}")
+        errors.append(f"cannot read {path.relative_to(ROOT)}: {exc}")
         return ""
 
 
-def local_links(markdown: str, source: Path) -> list[Path]:
-    """Return local Markdown link targets, ignoring anchors and external schemes."""
-    result = []
-    for target in re.findall(r"(?<!!)\[[^]]*\]\(([^)]+)\)", markdown):
-        target = target.strip().split(maxsplit=1)[0].strip("<>")
-        target = target.split("#", 1)[0]
-        if not target or "://" in target or target.startswith(("mailto:", "/")):
-            continue
-        result.append((source.parent / target).resolve())
-    return result
+def require(text: str, fragments: tuple[str, ...], label: str, errors: list[str]) -> None:
+    for fragment in fragments:
+        if fragment not in text:
+            errors.append(f"{label} must contain {fragment!r}")
 
 
 def validate_frontmatter(text: str, errors: list[str]) -> None:
     match = re.match(r"\A---\n(.*?)\n---\n", text, re.DOTALL)
     if not match:
-        fail(errors, "SKILL.md must begin with YAML frontmatter delimited by ---")
+        errors.append("SKILL.md must begin with YAML frontmatter")
         return
     fields: dict[str, str] = {}
-    field_names: list[str] = []
     for line in match.group(1).splitlines():
         field = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*):\s*(.*)", line)
         if not field:
-            fail(errors, f"invalid frontmatter line: {line!r}")
+            errors.append(f"invalid frontmatter line: {line!r}")
             continue
+        if field.group(1) in fields:
+            errors.append(f"duplicate frontmatter field: {field.group(1)}")
         fields[field.group(1)] = field.group(2).strip().strip("'\"")
-        field_names.append(field.group(1))
-    if len(field_names) != len(set(field_names)):
-        fail(errors, "SKILL.md frontmatter fields must not be duplicated")
     if set(fields) != {"name", "description"}:
-        fail(errors, "SKILL.md frontmatter must contain only name and description")
-    for key in ("name", "description"):
-        if not fields.get(key):
-            fail(errors, f"SKILL.md frontmatter {key!r} must be non-empty")
-    if fields.get("name") != SKILL_DIR.name:
-        fail(errors, "SKILL.md frontmatter name must match its containing folder")
+        errors.append("SKILL.md frontmatter must contain only name and description")
+    if fields.get("name") != SKILL.name or not fields.get("description"):
+        errors.append("SKILL.md name must match its directory and description must be non-empty")
 
 
-def validate_openai(text: str, errors: list[str]) -> None:
-    if not re.search(r"^interface:\s*$", text, re.MULTILINE):
-        fail(errors, "agents/openai.yaml must contain an interface mapping")
-    for field in ("display_name", "short_description", "default_prompt"):
-        match = re.search(rf"^\s{{2}}{field}:\s*(\"[^\"]*\"|'[^']*')\s*$", text, re.MULTILINE)
-        if not match:
-            fail(errors, f"agents/openai.yaml interface.{field} must be a quoted value")
-        elif not match.group(1)[1:-1].strip():
-            fail(errors, f"agents/openai.yaml interface.{field} must be non-empty")
-    prompt = re.search(r"^\s{2}default_prompt:\s*[\"'](.*)[\"']\s*$", text, re.MULTILINE)
-    if not prompt or "$orchestrate-parallel-work" not in prompt.group(1):
-        fail(errors, "agents/openai.yaml default_prompt must mention $orchestrate-parallel-work")
+def validate_links(text: str, errors: list[str]) -> None:
+    for target in re.findall(r"(?<!!)\[[^]]*\]\(([^)]+)\)", text):
+        target = target.strip().split(maxsplit=1)[0].strip("<>").split("#", 1)[0]
+        if not target or "://" in target or target.startswith(("mailto:", "/")):
+            continue
+        resolved = (SKILL_MD.parent / target).resolve()
+        if not resolved.exists():
+            errors.append(f"SKILL.md links to missing local file: {target}")
 
 
 def validate_readme(text: str, errors: list[str]) -> None:
-    if "目前仅支持 Codex" in text or "Codex only" in text:
-        fail(errors, "README must not claim Codex-only support")
-    for marker in ("Agent Skills", "Codex", "Claude Code"):
-        if marker not in text:
-            fail(errors, f"README support section must mention {marker}")
+    require(
+        text,
+        (
+            "Graph Engineering",
+            "awaiting_user_approval",
+            "effective_capacity = min(15",
+            "http://127.0.0.1:8088",
+            "Node.js",
+            "Validator",
+            "scripts/graphctl.mjs",
+            "scripts/dashboard-server.mjs",
+            "assets/schemas/",
+        ),
+        "README",
+        errors,
+    )
     installation = re.search(r"^## 安装\n(.*?)^## 许可证\n", text, re.MULTILINE | re.DOTALL)
     if not installation:
-        fail(errors, "README must contain installation and license sections")
+        errors.append("README must contain installation and license sections")
         return
-    installation_text = installation.group(1)
-    headings = re.findall(r"^### (.+)$", installation_text, re.MULTILINE)
-    expected_headings = ["全局安装", "项目安装", "给 AI 的安装 Prompt"]
-    if headings != expected_headings:
-        fail(errors, "README installation section must contain exactly the three supported installation entries")
-    if re.search(r"\bskills@\d", installation_text):
-        fail(errors, "README installation commands must not pin the skills CLI version")
-    if re.search(r"/tree/v\d", installation_text):
-        fail(errors, "README installation commands must not pin a skill release tag")
-    if installation_text.count(GLOBAL_ADD) != 1:
-        fail(errors, "README must contain the exact unversioned Codex and Claude Code global command once")
-    if installation_text.count(PROJECT_ADD) != 1:
-        fail(errors, "README must contain the exact unversioned project installation command once")
-    heading = "### 给 AI 的安装 Prompt"
-    if heading not in installation_text:
-        fail(errors, "README must provide an AI installation prompt")
-        return
-    prompt = installation_text.split(heading, 1)[1]
-    required_prompt_fragments = (
-        "`codex` for Codex",
-        "`claude-code` for Claude Code",
-        "If the host is neither one, stop",
-        "npx --yes skills list --global --agent <agent-id> --json",
-        f'npx --yes skills use "{MAIN_SKILL_URL}" --skill orchestrate-parallel-work',
-        f'npx --yes skills add "{MAIN_SKILL_URL}" --agent <agent-id> --global --yes',
-        "If the skill is not installed",
-        "recursively compare the installed directory",
-        "If they are identical, do not reinstall or update anything",
-        "If they differ",
-        "Do not use `skills update`",
+    body = installation.group(1)
+    if re.findall(r"^### (.+)$", body, re.MULTILINE) != ["全局安装", "项目安装", "给 AI 的安装 Prompt"]:
+        errors.append("README installation section must contain exactly the three supported entries")
+    if re.search(r"\bskills@\d", body) or re.search(r"/tree/v\d", body):
+        errors.append("README installation guidance must not pin CLI or skill versions")
+    if body.count(GLOBAL_ADD) != 1 or body.count(PROJECT_ADD) != 1:
+        errors.append("README must contain the exact unversioned global and project commands once")
+    require(
+        body,
+        (
+            "npx --yes skills list --global --agent <agent-id> --json",
+            f'npx --yes skills use "{MAIN_URL}" --skill orchestrate-parallel-work',
+            f'npx --yes skills add "{MAIN_URL}" --agent <agent-id> --global --yes',
+            "recursively compare the installed directory",
+            "If they are identical, do not reinstall or update anything",
+            "Do not use `skills update`",
+            "`scripts/graphctl.mjs`",
+            "`scripts/dashboard-server.mjs`",
+            "`assets/schemas/graph-plan.schema.json`",
+            "`assets/dashboard/index.html`",
+        ),
+        "README AI installation prompt",
+        errors,
     )
-    for fragment in required_prompt_fragments:
-        if fragment not in prompt:
-            fail(errors, f"README AI prompt is missing comparison/update requirement: {fragment}")
-    for expected_path in (
-        "SKILL.md",
-        "references/runtime-generic.md",
-        "references/runtime-codex.md",
-        "references/runtime-claude-code.md",
-        "references/validation.md",
-    ):
-        if f"`{expected_path}`" not in prompt:
-            fail(errors, f"README AI prompt must verify installed {expected_path}")
 
 
 def validate_cases(errors: list[str]) -> None:
     try:
-        cases = json.loads(read(CASES_FILE, errors))
+        payload = json.loads(read(CASES, errors))
     except json.JSONDecodeError as exc:
-        fail(errors, f"tests/cases.json is invalid JSON: {exc}")
+        errors.append(f"tests/cases.json is invalid JSON: {exc}")
         return
-    if not isinstance(cases, dict) or set(cases) != {"schema_version", "cases"}:
-        fail(errors, "cases.json must contain only schema_version and cases")
+    if not isinstance(payload, dict) or set(payload) != {"schema_version", "cases"} or payload.get("schema_version") != 2:
+        errors.append("cases.json must contain schema_version 2 and cases only")
         return
-    if cases["schema_version"] != 1 or not isinstance(cases["cases"], list):
-        fail(errors, "cases.json requires schema_version 1 and a cases array")
+    cases = payload.get("cases")
+    if not isinstance(cases, list):
+        errors.append("cases.json cases must be an array")
         return
-    required_ids = {
-        "single-output-no-split", "plan-only-no-execution", "coupled-work-serial-or-decouple",
-        "independent-workstreams-may-parallelize", "codex-instructions-win", "claude-instructions-win",
-        "unavailable-runtime-override-no-substitution", "foundation-change-stales-results",
-        "blind-validator-no-conclusion", "worktree-cwd-isolation", "coordinator-only-delegation",
-        "codex-full-history-inherits-parent", "claude-fresh-context-explicit-handoff",
-        "claude-worktree-baseline-verified", "no-delegation-serial-fallback",
-    }
-    actual_ids: set[str] = set()
-    for index, case in enumerate(cases["cases"]):
+    ids: list[str] = []
+    for index, case in enumerate(cases):
         if not isinstance(case, dict) or set(case) != {"id", "scenario", "invariants"}:
-            fail(errors, f"case {index} must contain only id, scenario, and invariants")
+            errors.append(f"case {index} must contain id, scenario, and invariants only")
             continue
-        case_id = case["id"]
-        scenario = case["scenario"]
-        invariants = case["invariants"]
-        if not isinstance(case_id, str) or not case_id or case_id in actual_ids:
-            fail(errors, f"case {index} has a missing or duplicate id")
-        actual_ids.add(case_id if isinstance(case_id, str) else "")
-        if not isinstance(scenario, str) or not scenario.strip():
-            fail(errors, f"case {case_id!r} needs a non-empty scenario")
-        if not isinstance(invariants, list) or not invariants or not all(isinstance(x, str) and x.strip() for x in invariants):
-            fail(errors, f"case {case_id!r} needs a non-empty invariant string list")
-    if actual_ids != required_ids:
-        fail(errors, "cases.json must cover exactly the required behavioral case IDs")
+        ids.append(case["id"])
+        if not isinstance(case["scenario"], str) or not case["scenario"].strip():
+            errors.append(f"case {index} needs a scenario")
+        if not isinstance(case["invariants"], list) or not case["invariants"] or not all(isinstance(item, str) and item.strip() for item in case["invariants"]):
+            errors.append(f"case {index} needs invariant strings")
+    if len(ids) != len(set(ids)) or set(ids) != CASE_IDS:
+        errors.append("cases.json must cover exactly the required Graph Engineering cases")
+
+
+def validate_schemas(errors: list[str]) -> None:
+    for name in SCHEMAS:
+        path = SKILL / "assets" / "schemas" / name
+        try:
+            schema = json.loads(read(path, errors))
+        except json.JSONDecodeError as exc:
+            errors.append(f"{name} is invalid JSON: {exc}")
+            continue
+        if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+            errors.append(f"{name} must use JSON Schema draft 2020-12")
+        if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+            errors.append(f"{name} must define a closed top-level object")
 
 
 def main() -> int:
     errors: list[str] = []
-    required_paths = (
-        README_FILE, SKILL_DIR, SKILL_FILE, OPENAI_FILE, LICENSE_FILE,
-        GENERIC_RUNTIME_FILE, CODEX_RUNTIME_FILE, CLAUDE_RUNTIME_FILE,
-        VALIDATION_FILE, CASES_FILE,
-    )
-    for path in required_paths:
+    for path in REQUIRED:
         if not path.exists():
-            fail(errors, f"missing required path: {path.relative_to(ROOT)}")
-    readme = read(README_FILE, errors)
-    skill = read(SKILL_FILE, errors)
-    openai = read(OPENAI_FILE, errors)
-    license_text = read(LICENSE_FILE, errors)
-    generic_runtime = read(GENERIC_RUNTIME_FILE, errors)
-    codex_runtime = read(CODEX_RUNTIME_FILE, errors)
-    claude_runtime = read(CLAUDE_RUNTIME_FILE, errors)
-    validation = read(VALIDATION_FILE, errors)
-    validate_readme(readme, errors)
+            errors.append(f"missing required path: {path.relative_to(ROOT)}")
+    readme = read(README, errors)
+    skill = read(SKILL_MD, errors)
+    openai = read(OPENAI, errors)
+    generic = read(SKILL / "references" / "runtime-generic.md", errors)
+    codex = read(SKILL / "references" / "runtime-codex.md", errors)
+    claude = read(SKILL / "references" / "runtime-claude-code.md", errors)
+    validation = read(SKILL / "references" / "validation.md", errors)
+    dashboard_server = read(SKILL / "scripts" / "dashboard-server.mjs", errors)
+    graph_core = read(SKILL / "scripts" / "graph-core.mjs", errors)
+    dashboard_css = read(SKILL / "assets" / "dashboard" / "styles.css", errors)
+    dashboard_js = read(SKILL / "assets" / "dashboard" / "app.js", errors)
+
     validate_frontmatter(skill, errors)
-    validate_openai(openai, errors)
-    if "MIT" not in license_text or "copyright" not in license_text.lower():
-        fail(errors, "nested LICENSE must contain MIT and a copyright notice")
-    for link in local_links(skill, SKILL_FILE):
-        if not link.exists():
-            try:
-                display = link.relative_to(ROOT)
-            except ValueError:
-                display = link
-            fail(errors, f"SKILL.md links to missing local reference: {display}")
-    if (SKILL_DIR / "references" / "codex-runtime.md").exists():
-        fail(errors, "legacy Codex-only runtime reference must be removed")
-    core_text = "\n".join((skill, generic_runtime))
-    for literal in CORE_PLATFORM_LITERALS:
-        if literal in core_text:
-            fail(errors, f"generic core contains platform-specific runtime literal: {literal}")
-    for literal in ("AGENTS.md", "fork_turns", "runtime-generic.md"):
-        if literal not in codex_runtime:
-            fail(errors, f"Codex adapter must contain {literal}")
-    for literal in ("CLAUDE.md", "Agent tool", "isolation: worktree", "runtime-generic.md"):
-        if literal not in claude_runtime:
-            fail(errors, f"Claude Code adapter must contain {literal}")
-    repository_text = "\n".join(
-        (skill, openai, generic_runtime, codex_runtime, claude_runtime, validation)
-    )
-    for literal in STALE_LITERALS:
-        if literal in repository_text:
-            fail(errors, f"forbidden stale runtime literal present: {literal}")
+    validate_links(skill, errors)
+    validate_readme(readme, errors)
     validate_cases(errors)
+    validate_schemas(errors)
+    require(skill, ("awaiting_user_approval", "plan_hash", "effective_capacity = min(15", "graphctl.mjs", "dashboard-server.mjs", "Validator"), "SKILL.md", errors)
+    for literal in ("AGENTS.md", "CLAUDE.md", "fork_turns", "isolation: worktree"):
+        if literal in f"{skill}\n{generic}":
+            errors.append(f"generic core contains platform-specific literal: {literal}")
+    require(codex, ("AGENTS.md", "fork_turns", "runtime-generic.md"), "Codex adapter", errors)
+    require(claude, ("CLAUDE.md", "Agent tool", "isolation: worktree", "runtime-generic.md"), "Claude adapter", errors)
+    require(validation, ("test gate", "lint gate", "fact-only", "Expected fact", "Observed fact"), "validation reference", errors)
+    require(graph_core, ("HARD_AGENT_LIMIT = 15", "computePlanHash", "validateBundle", "validateValidatorBrief", "readyNodeIds"), "graph-core.mjs", errors)
+    require(dashboard_server, ('const HOST = "127.0.0.1"', "const DEFAULT_PORT = 8088", "GET", "HEAD", "text/event-stream"), "dashboard-server.mjs", errors)
+    require(dashboard_css, ("prefers-reduced-motion", "stroke-dasharray", "stroke-dashoffset", "@keyframes flow", "@keyframes pulse"), "Dashboard CSS", errors)
+    require(dashboard_js, ("createElementNS", "EventSource", "setInterval", "textContent"), "Dashboard app", errors)
+    require(openai, ("display_name:", "short_description:", "default_prompt:", "$orchestrate-parallel-work"), "agents/openai.yaml", errors)
+    try:
+        package = json.loads(read(PACKAGE, errors))
+        if package.get("private") is not True or not {"test", "lint"}.issubset(package.get("scripts", {})):
+            errors.append("package.json must be private and provide test and lint scripts")
+    except json.JSONDecodeError as exc:
+        errors.append(f"package.json is invalid JSON: {exc}")
+    license_text = read(SKILL / "LICENSE", errors)
+    if "MIT" not in license_text or "copyright" not in license_text.lower():
+        errors.append("nested LICENSE must contain MIT and a copyright notice")
+
     if errors:
         print("Repository validation failed:", file=sys.stderr)
         for error in errors:
