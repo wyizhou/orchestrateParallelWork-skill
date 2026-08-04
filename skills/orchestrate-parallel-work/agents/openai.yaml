@@ -1,4 +1,4 @@
 interface:
   display_name: "并行任务编排"
-  short_description: "先判断复杂工作是否值得拆分，再安全执行、集成和独立验收"
-  default_prompt: "Use $orchestrate-parallel-work to decide whether this task benefits from decomposition, distinguish planning from authorized execution, and require task-appropriate verification evidence before integrating independent work units."
+  short_description: "跨平台拆分复杂工作，安全执行、集成和独立验收"
+  default_prompt: "Use $orchestrate-parallel-work to decide whether this task benefits from decomposition, adapt execution to the current agent runtime, and require verification evidence before integrating independent work units."
