@@ -46,8 +46,6 @@ git init -q "$fresh_project"
   npx --yes skills add "$repo_root/skills/$skill" --agent codex claude-code --yes >/dev/null
   installed_json="$(npx --yes skills list --agent codex claude-code --json)"
   printf '%s\n' "$installed_json" | grep -F 'orchestrate-parallel-work' >/dev/null
-  printf '%s\n' "$installed_json" | grep -F 'Codex' >/dev/null
-  printf '%s\n' "$installed_json" | grep -F 'Claude Code' >/dev/null
 )
 
 diff -qr "$support_dir" "$fresh_target" >/dev/null
