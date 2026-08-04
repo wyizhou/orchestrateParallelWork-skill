@@ -1,6 +1,6 @@
 ---
 name: orchestrate-parallel-work
-description: 把具有多个可独立验证工作流、依赖关系或写入面的复杂目标拆成隔离单元；必要时先交付共享基础，再分波次执行、统一集成和独立终验。Use when Codex must plan or coordinate genuinely multi-part work involving task decomposition, workstreams, branches or worktrees, subagents, staged integration, or cross-unit validation. Do not use for small single-output tasks or ordinary validation with no parallel workstreams.
+description: 把具有多个可独立验证工作流、依赖关系或写入面的复杂目标拆成隔离单元；必要时先交付共享基础，再分波次执行、统一集成和独立终验。Use when an AI agent runtime must plan or coordinate genuinely multi-part work involving task decomposition, workstreams, branches or worktrees, delegated agents, staged integration, or cross-unit validation. Do not use for small single-output tasks or ordinary validation with no parallel workstreams.
 ---
 
 # Orchestrate Parallel Work
@@ -48,8 +48,10 @@ ID / 名称：
 负责范围、禁止范围与唯一负责人：
 分支 / workdir（或其他隔离方式）：
 允许的工具与外部影响：
-上下文与 fork 策略：
-模型 / 推理选择、可用性和选择理由：
+适用的指令来源与优先级：
+可用的委派、上下文、隔离与并发能力：
+执行配置或父级继承、可用性与选择理由：
+上下文交接策略：
 预期产物、验收标准与验证证据：
 集成顺序、失败回退与对下游影响：
 ```
@@ -62,9 +64,10 @@ ID / 名称：
 
 为代码任务固定集成基线；在共享基础通过后，从同一集成提交创建单元分支和 worktree。每个执行者只写其指定 worktree，先向集成分支交付，再统一面向正式基线交付。对非代码工作，冻结输入快照并隔离上下文、证据、查询或章节所有权。
 
-**在创建任何执行者或 Validator、选择模型/推理、设置 fork 上下文、创建 worktree，或检查并发容量之前，读取 [Codex 运行时、上下文与 worktree 规则](references/codex-runtime.md)。**
+**在创建任何执行者或 Validator、选择执行配置、设置上下文、创建 worktree，或检查并发容量之前，读取 [通用运行时与隔离规则](references/runtime-generic.md)。当宿主为 Codex 时再读取 [Codex 适配](references/runtime-codex.md)；当宿主为 Claude Code 时再读取 [Claude Code 适配](references/runtime-claude-code.md)。其他运行时仅使用通用规则和已验证的实际能力。**
 
 只有用户或上级规则允许时，才创建子 Agent、分支、worktree、外部消息或真实系统变更。
+仅顶层协调者可创建、跟进或终止执行者；单元执行者和 Validator 不得继续嵌套委派。
 
 ## 6. Execute in dependency waves
 

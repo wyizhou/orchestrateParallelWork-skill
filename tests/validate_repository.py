@@ -15,14 +15,19 @@ SKILL_DIR = ROOT / "skills" / "orchestrate-parallel-work"
 SKILL_FILE = SKILL_DIR / "SKILL.md"
 OPENAI_FILE = SKILL_DIR / "agents" / "openai.yaml"
 LICENSE_FILE = SKILL_DIR / "LICENSE"
+GENERIC_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-generic.md"
+CODEX_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-codex.md"
+CLAUDE_RUNTIME_FILE = SKILL_DIR / "references" / "runtime-claude-code.md"
+VALIDATION_FILE = SKILL_DIR / "references" / "validation.md"
 CASES_FILE = ROOT / "tests" / "cases.json"
 STALE_LITERALS = ("gpt-5.6-luna", "light")
+CORE_PLATFORM_LITERALS = ("AGENTS.md", "CLAUDE.md", "fork_turns", "isolation: worktree")
 MAIN_SKILL_URL = (
     "https://github.com/wyizhou/orchestrateParallelWork-skill/"
     "tree/main/skills/orchestrate-parallel-work"
 )
-GLOBAL_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex --global --yes'
-PROJECT_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex --yes'
+GLOBAL_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex claude-code --global --yes'
+PROJECT_ADD = f'npx --yes skills add "{MAIN_SKILL_URL}" --agent codex claude-code --yes'
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -89,8 +94,11 @@ def validate_openai(text: str, errors: list[str]) -> None:
 
 
 def validate_readme(text: str, errors: list[str]) -> None:
-    if "目前仅支持 Codex" not in text:
-        fail(errors, "README must state that only Codex is currently supported")
+    if "目前仅支持 Codex" in text or "Codex only" in text:
+        fail(errors, "README must not claim Codex-only support")
+    for marker in ("Agent Skills", "Codex", "Claude Code"):
+        if marker not in text:
+            fail(errors, f"README support section must mention {marker}")
     installation = re.search(r"^## 安装\n(.*?)^## 许可证\n", text, re.MULTILINE | re.DOTALL)
     if not installation:
         fail(errors, "README must contain installation and license sections")
@@ -104,8 +112,8 @@ def validate_readme(text: str, errors: list[str]) -> None:
         fail(errors, "README installation commands must not pin the skills CLI version")
     if re.search(r"/tree/v\d", installation_text):
         fail(errors, "README installation commands must not pin a skill release tag")
-    if installation_text.count(GLOBAL_ADD) != 2:
-        fail(errors, "README must use the exact unversioned global command once directly and once in the AI prompt")
+    if installation_text.count(GLOBAL_ADD) != 1:
+        fail(errors, "README must contain the exact unversioned Codex and Claude Code global command once")
     if installation_text.count(PROJECT_ADD) != 1:
         fail(errors, "README must contain the exact unversioned project installation command once")
     heading = "### 给 AI 的安装 Prompt"
@@ -114,8 +122,12 @@ def validate_readme(text: str, errors: list[str]) -> None:
         return
     prompt = installation_text.split(heading, 1)[1]
     required_prompt_fragments = (
-        "npx --yes skills list --global --agent codex --json",
+        "`codex` for Codex",
+        "`claude-code` for Claude Code",
+        "If the host is neither one, stop",
+        "npx --yes skills list --global --agent <agent-id> --json",
         f'npx --yes skills use "{MAIN_SKILL_URL}" --skill orchestrate-parallel-work',
+        f'npx --yes skills add "{MAIN_SKILL_URL}" --agent <agent-id> --global --yes',
         "If the skill is not installed",
         "recursively compare the installed directory",
         "If they are identical, do not reinstall or update anything",
@@ -127,8 +139,9 @@ def validate_readme(text: str, errors: list[str]) -> None:
             fail(errors, f"README AI prompt is missing comparison/update requirement: {fragment}")
     for expected_path in (
         "SKILL.md",
-        "agents/openai.yaml",
-        "references/codex-runtime.md",
+        "references/runtime-generic.md",
+        "references/runtime-codex.md",
+        "references/runtime-claude-code.md",
         "references/validation.md",
     ):
         if f"`{expected_path}`" not in prompt:
@@ -149,9 +162,11 @@ def validate_cases(errors: list[str]) -> None:
         return
     required_ids = {
         "single-output-no-split", "plan-only-no-execution", "coupled-work-serial-or-decouple",
-        "independent-workstreams-may-parallelize", "agents-rule-wins", "unavailable-explicit-model-no-substitution",
-        "foundation-change-stales-results", "blind-validator-no-conclusion", "worktree-cwd-isolation",
-        "full-history-fork-inherits-parent",
+        "independent-workstreams-may-parallelize", "codex-instructions-win", "claude-instructions-win",
+        "unavailable-runtime-override-no-substitution", "foundation-change-stales-results",
+        "blind-validator-no-conclusion", "worktree-cwd-isolation", "coordinator-only-delegation",
+        "codex-full-history-inherits-parent", "claude-fresh-context-explicit-handoff",
+        "claude-worktree-baseline-verified", "no-delegation-serial-fallback",
     }
     actual_ids: set[str] = set()
     for index, case in enumerate(cases["cases"]):
@@ -174,13 +189,22 @@ def validate_cases(errors: list[str]) -> None:
 
 def main() -> int:
     errors: list[str] = []
-    for path in (README_FILE, SKILL_DIR, SKILL_FILE, OPENAI_FILE, LICENSE_FILE, CASES_FILE):
+    required_paths = (
+        README_FILE, SKILL_DIR, SKILL_FILE, OPENAI_FILE, LICENSE_FILE,
+        GENERIC_RUNTIME_FILE, CODEX_RUNTIME_FILE, CLAUDE_RUNTIME_FILE,
+        VALIDATION_FILE, CASES_FILE,
+    )
+    for path in required_paths:
         if not path.exists():
             fail(errors, f"missing required path: {path.relative_to(ROOT)}")
     readme = read(README_FILE, errors)
     skill = read(SKILL_FILE, errors)
     openai = read(OPENAI_FILE, errors)
     license_text = read(LICENSE_FILE, errors)
+    generic_runtime = read(GENERIC_RUNTIME_FILE, errors)
+    codex_runtime = read(CODEX_RUNTIME_FILE, errors)
+    claude_runtime = read(CLAUDE_RUNTIME_FILE, errors)
+    validation = read(VALIDATION_FILE, errors)
     validate_readme(readme, errors)
     validate_frontmatter(skill, errors)
     validate_openai(openai, errors)
@@ -193,8 +217,20 @@ def main() -> int:
             except ValueError:
                 display = link
             fail(errors, f"SKILL.md links to missing local reference: {display}")
+    if (SKILL_DIR / "references" / "codex-runtime.md").exists():
+        fail(errors, "legacy Codex-only runtime reference must be removed")
+    core_text = "\n".join((skill, generic_runtime))
+    for literal in CORE_PLATFORM_LITERALS:
+        if literal in core_text:
+            fail(errors, f"generic core contains platform-specific runtime literal: {literal}")
+    for literal in ("AGENTS.md", "fork_turns", "runtime-generic.md"):
+        if literal not in codex_runtime:
+            fail(errors, f"Codex adapter must contain {literal}")
+    for literal in ("CLAUDE.md", "Agent tool", "isolation: worktree", "runtime-generic.md"):
+        if literal not in claude_runtime:
+            fail(errors, f"Claude Code adapter must contain {literal}")
     repository_text = "\n".join(
-        read(path, errors) for path in (SKILL_FILE, OPENAI_FILE)
+        (skill, openai, generic_runtime, codex_runtime, claude_runtime, validation)
     )
     for literal in STALE_LITERALS:
         if literal in repository_text:
