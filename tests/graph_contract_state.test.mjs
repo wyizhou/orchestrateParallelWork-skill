@@ -387,12 +387,16 @@ test("state engine rejects illegal transitions and stales transitive descendants
 });
 
 test("an artifact contract change invalidates all transitive consumer nodes", () => {
-  const compiled = compileBundle(validBundle());
-  const state = createExecutionState(compiled);
-  state.nodes.build = { status: "accepted", attempt: 1 };
-  state.nodes.validate = { status: "accepted", attempt: 1 };
-  assert.deepEqual(invalidateArtifactDescendants(compiled, state, "build-result"), ["validate"]);
-  assert.equal(state.nodes.validate.status, "stale");
+  const compiled = {
+    bundle: { artifactCatalog: { artifacts: [{ artifact_contract_id: "source-result", producer: { node_id: "source" } }] } },
+    topology: { outgoing: new Map([["source", ["left", "right"]], ["left", ["join"]], ["right", ["join"]], ["join", []], ["unrelated", []]]) },
+  };
+  const state = { nodes: Object.fromEntries(["source", "left", "right", "join", "unrelated"].map((id) => [id, { status: "accepted", attempt: 1 }])) };
+  assert.deepEqual(invalidateArtifactDescendants(compiled, state, "source-result"), ["left", "right", "join"]);
+  assert.equal(state.nodes.left.status,"stale");
+  assert.equal(state.nodes.right.status,"stale");
+  assert.equal(state.nodes.join.status,"stale");
+  assert.equal(state.nodes.unrelated.status,"accepted");
   assert.throws(() => invalidateArtifactDescendants(compiled, state, "missing"), /unknown artifact contract/);
 });
 
