@@ -69,47 +69,49 @@ page.on("pageerror",(error)=>consoleErrors.push(error.message));
 
 try {
   await page.goto(dashboard.url,{waitUntil:"networkidle"});
-  await page.locator("#connection").filter({hasText:"Live"}).waitFor();
+  assert.equal(await page.evaluate(async()=>{await document.fonts.ready;return document.fonts.check('14px "OPW Noto Sans SC"');}),true);
+  await page.locator("#connection").filter({hasText:"实时"}).waitFor();
+  await page.locator('[data-view="graph"]').waitFor();
   assert.equal(await page.locator(".node").count(),6);
   assert.equal(await page.locator(".edge-label").count(),6);
   assert.match(await page.locator(".node.active,.node.running").first().evaluate((node)=>getComputedStyle(node).animationName),/nodePulse/);
 
-  await page.getByRole("button",{name:/api, Build snapshot API/i}).click();
+  await page.locator('.node[data-node-id="api"]').click();
   await page.locator("#inspector-title").filter({hasText:"Build snapshot API"}).waitFor();
-  await page.getByRole("button",{name:/Tasks/}).click();
-  await page.getByLabel("Search tasks").fill("no-such-task");
-  await page.getByText("当前条件下没有匹配 Task。").waitFor();
-  await page.getByLabel("Search tasks").fill("");
+  await page.getByRole("button",{name:/任务/}).click();
+  await page.getByLabel("搜索任务").fill("no-such-task");
+  await page.getByText("当前条件下没有匹配的 Task。").waitFor();
+  await page.getByLabel("搜索任务").fill("");
   await page.locator("#task-table tbody tr[data-id]").first().click();
   await page.getByRole("dialog").waitFor();
   await page.keyboard.press("Escape");
-  await page.getByRole("button",{name:/Artifacts/}).click();
+  await page.getByRole("button",{name:/产物/}).click();
   await page.locator(".version").first().click();
-  await page.getByText("Artifact inspector",{exact:true}).waitFor();
+  await page.getByText("Artifact 检查器",{exact:true}).waitFor();
   await page.keyboard.press("Escape");
-  await page.getByRole("button",{name:/Runs \/ Agents/}).click();
-  await page.getByLabel("Search runs").fill("agent-developer-1");
+  await page.getByRole("button",{name:/运行 \/ Agent/}).click();
+  await page.getByLabel("搜索运行记录").fill("agent-developer-1");
   assert.equal(await page.locator("#run-table tbody tr[data-id]").count(),1);
-  await page.getByLabel("Search runs").fill("");
+  await page.getByLabel("搜索运行记录").fill("");
   await page.locator("#run-table tbody tr[data-id]").first().click();
-  await page.getByText("Node run inspector",{exact:true}).waitFor();
+  await page.getByText("Node Run 检查器",{exact:true}).waitFor();
   await page.keyboard.press("Escape");
-  await page.getByRole("button",{name:/Events/}).click();
+  await page.getByRole("button",{name:/事件/}).click();
   assert.equal(await page.locator(".event").count(),3);
 
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
   await page.screenshot({path:path.join(evidenceDir,"mobile-events.png"),fullPage:true});
   await page.setViewportSize({width:1440,height:1024});
-  await page.getByRole("button",{name:/Graph/}).click();
+  await page.locator('[data-view="graph"]').click();
   await page.screenshot({path:path.join(evidenceDir,"desktop-graph.png"),fullPage:true});
 
   await writeFile(path.join(runDir,"state.json"),"{");
-  await page.locator("#connection").filter({hasText:"Degraded"}).waitFor({timeout:2_000});
-  await page.getByText(/Showing last valid revision r1/).waitFor();
+  await page.locator("#connection").filter({hasText:"已降级"}).waitFor({timeout:2_000});
+  await page.getByText(/当前显示最后一个有效修订 r1/).waitFor();
   await json("state.json",{revision:2,phase:"running",updated_at:"2026-08-05T09:06:00Z",platform_capacity:8,permission_capacity:6});
   await page.locator("#revision-value").filter({hasText:"r2"}).waitFor({timeout:2_000});
-  await page.locator("#connection").filter({hasText:"Live"}).waitFor();
+  await page.locator("#connection").filter({hasText:"实时"}).waitFor();
 
   const finalChecks=[{gate:"test_gate",status:"passed",step:"npm test",exit_code:0,evidence_ref:"final-test"},{gate:"lint_gate",status:"passed",step:"npm run lint",exit_code:0,evidence_ref:"final-lint"}];
   await json("node-runs.json",{coordinator_agent_instance_id:"agent-coordinator-1",entries:[
@@ -117,7 +119,7 @@ try {
   ].map(([node_id,agent_type_id,status,attempt])=>({node_run_id:`run-${node_id}-a${attempt}`,node_id,attempt,agent_instance_id:`agent-${agent_type_id}-1`,agent_type_id,status,input_artifacts:[],output_artifacts:[],self_checks:finalChecks,validator_status:"accepted",ended_at:"2026-08-05T09:07:00Z"}))});
   await json("artifact-registry.json",{artifacts:["research-report","api-bundle","ui-bundle","final-bundle"].map((artifact_contract_id,index)=>({artifact_id:`${artifact_contract_id}-v1`,artifact_contract_id,artifact_version:1,status:"accepted",producer:{node_id:["research","api","ui","integrate"][index],node_run_id:`run-${["research","api","ui","integrate"][index]}-a1`,attempt:1,agent_instance_id:"agent-final-1"},digest:`sha256:${String(index+1).repeat(64)}`,created_at:"2026-08-05T09:06:30Z",accepted_at:"2026-08-05T09:07:00Z",validation_evidence_refs:["final-validation"]}))});
   await json("state.json",{revision:3,phase:"completed",updated_at:"2026-08-05T09:07:00Z",platform_capacity:8,permission_capacity:6});
-  await page.locator("#connection").filter({hasText:/Run complete · Server stopped/}).waitFor({timeout:4_000});
+  await page.locator("#connection").filter({hasText:/运行已完成 · 服务已停止/}).waitFor({timeout:4_000});
   assert.equal(await page.locator(".node").count(),6);
   await page.screenshot({path:path.join(evidenceDir,"final-server-stopped.png"),fullPage:true});
   assert.deepEqual(consoleErrors,[]);

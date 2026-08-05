@@ -34,6 +34,8 @@ Only inspect control-plane files within the selected run directory. Display exte
 
 The responsive dark console provides dedicated Graph, Tasks, Artifacts, Runs / Agents, and Events views. The Graph view shows summary counts, capacity, approval, phase, and topological waves. Selecting a Node shows its Task, Agent assignment, inputs/outputs, attempts, test/lint evidence, and Validator status. Selecting an Edge shows its Artifact Contract, versions, producer, consumers, and delivery state. Task, Artifact, and Run rows open independent structured inspectors; Events remain a factual, newest-first stream.
 
+User-facing navigation, state, filters, notices, and inspector labels use Chinese as the primary language while protocol entities such as Node, Edge, Task, Artifact, Agent Instance, IDs, paths, and raw JSON retain their canonical names. A bundled Noto Sans SC subset keeps the Chinese control surface readable when the client system has no CJK font.
+
 Node state colors distinguish planned/blocked/ready/active/submitted/accepted/integrated/failed/stale/skipped. Animate only active Nodes and Edges that are producing or flowing accepted Artifacts into an active consumer. Respect reduced-motion browser preferences.
 
 The page is read-only. User approval remains in the authoritative Agent conversation; after explicit approval, the Coordinator records the matching plan ID/version/hash and execution state changes appear automatically. The finalization acknowledgement is ephemeral delivery confirmation only: it cannot change Graph, approval, execution, or Artifact state.

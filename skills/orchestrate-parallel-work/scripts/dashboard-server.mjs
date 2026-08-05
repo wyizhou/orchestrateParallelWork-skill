@@ -15,6 +15,7 @@ const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/assets/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/assets/styles.css", ["styles.css", "text/css; charset=utf-8"]],
+  ["/assets/fonts/NotoSansSC-UI.woff2", ["fonts/NotoSansSC-UI.woff2", "font/woff2"]],
 ]);
 
 function json(response, status, value, head = false) {

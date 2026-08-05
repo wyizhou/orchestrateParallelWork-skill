@@ -44,6 +44,8 @@ REQUIRED = (
     SKILL / "assets" / "dashboard" / "index.html",
     SKILL / "assets" / "dashboard" / "styles.css",
     SKILL / "assets" / "dashboard" / "app.js",
+    SKILL / "assets" / "dashboard" / "fonts" / "NotoSansSC-UI.woff2",
+    SKILL / "assets" / "dashboard" / "fonts" / "OFL.txt",
     SKILL / "references" / "graph-contracts.md",
     SKILL / "references" / "dashboard.md",
     SKILL / "references" / "runtime-generic.md",

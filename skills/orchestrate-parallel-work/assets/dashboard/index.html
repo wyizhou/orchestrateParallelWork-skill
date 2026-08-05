@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Orchestrate Parallel Work — Runtime Dashboard</title>
+  <title>Orchestrate Parallel Work — 编排控制台</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -12,30 +12,30 @@
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div><div class="brand-name">Orchestrate<br>Parallel Work</div><div class="brand-sub">Graph Runtime</div></div>
+        <div><div class="brand-name">Orchestrate<br>Parallel Work</div><div class="brand-sub">图编排运行时</div></div>
       </div>
-      <nav id="primary-nav" class="nav" aria-label="Primary views">
-        <button class="nav-btn" data-view="graph" aria-current="page"><span class="nav-label"><span class="nav-icon">⌘</span>Graph</span><span class="nav-count" data-count="nodes">—</span></button>
-        <button class="nav-btn" data-view="tasks"><span class="nav-label"><span class="nav-icon">≡</span>Tasks</span><span class="nav-count" data-count="tasks">—</span></button>
-        <button class="nav-btn" data-view="artifacts"><span class="nav-label"><span class="nav-icon">◇</span>Artifacts</span><span class="nav-count" data-count="artifacts">—</span></button>
-        <button class="nav-btn" data-view="runs"><span class="nav-label"><span class="nav-icon">◎</span>Runs / Agents</span><span class="nav-count" data-count="runs">—</span></button>
-        <button class="nav-btn" data-view="events"><span class="nav-label"><span class="nav-icon">↳</span>Events</span><span class="nav-count" data-count="events">—</span></button>
+      <nav id="primary-nav" class="nav" aria-label="主要视图">
+        <button class="nav-btn" data-view="graph" aria-current="page"><span class="nav-label"><span class="nav-icon" aria-hidden="true">图</span>执行图</span><span class="nav-count" data-count="nodes">—</span></button>
+        <button class="nav-btn" data-view="tasks"><span class="nav-label"><span class="nav-icon" aria-hidden="true">任</span>任务</span><span class="nav-count" data-count="tasks">—</span></button>
+        <button class="nav-btn" data-view="artifacts"><span class="nav-label"><span class="nav-icon" aria-hidden="true">产</span>产物</span><span class="nav-count" data-count="artifacts">—</span></button>
+        <button class="nav-btn" data-view="runs"><span class="nav-label"><span class="nav-icon" aria-hidden="true">运</span>运行 / Agent</span><span class="nav-count" data-count="runs">—</span></button>
+        <button class="nav-btn" data-view="events"><span class="nav-label"><span class="nav-icon" aria-hidden="true">事</span>事件</span><span class="nav-count" data-count="events">—</span></button>
       </nav>
-      <div class="sidebar-foot"><div class="readonly"><strong>Read-only console</strong>Plan approval and execution control remain in the Agent conversation.</div></div>
+      <div class="sidebar-foot"><div class="readonly"><strong>只读控制台</strong>计划批准与执行控制仍在 Agent 对话中完成。</div></div>
     </aside>
 
     <section class="workspace">
       <header class="topbar">
         <div class="run-context">
-          <button id="run-id" class="run-id mono" aria-label="Copy run ID">Waiting for run… <span aria-hidden="true">⧉</span></button>
-          <div class="context-pair"><div class="context-label">Plan</div><div id="plan-value" class="context-value">—</div></div>
-          <div class="context-pair context-updated"><div class="context-label">Revision</div><div id="revision-value" class="context-value">—</div></div>
-          <div class="context-pair context-updated"><div class="context-label">Updated</div><div id="updated-value" class="context-value">—</div></div>
+          <button id="run-id" class="run-id mono" aria-label="复制运行 ID">等待运行… <span aria-hidden="true">复制</span></button>
+          <div class="context-pair"><div class="context-label">计划</div><div id="plan-value" class="context-value">—</div></div>
+          <div class="context-pair context-updated"><div class="context-label">修订</div><div id="revision-value" class="context-value">—</div></div>
+          <div class="context-pair context-updated"><div class="context-label">更新时间</div><div id="updated-value" class="context-value">—</div></div>
         </div>
         <div class="top-status">
-          <span id="approval-pill" class="pill neutral">Unknown</span>
-          <span id="phase-pill" class="pill neutral">Waiting</span>
-          <button id="connection" class="pill connecting" aria-label="Connection details" role="status" aria-live="polite">Connecting</button>
+          <span id="approval-pill" class="pill neutral">未知</span>
+          <span id="phase-pill" class="pill neutral">等待中</span>
+          <button id="connection" class="pill connecting" aria-label="连接详情" role="status" aria-live="polite">正在连接</button>
         </div>
       </header>
 
@@ -43,45 +43,45 @@
         <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
 
         <section id="view-graph" class="view active" aria-labelledby="graph-heading">
-          <h1 id="graph-heading" class="sr-only">Execution graph</h1>
-          <div id="summary" class="summary-strip" aria-label="Run summary"></div>
+          <h1 id="graph-heading" class="sr-only">执行图</h1>
+          <div id="summary" class="summary-strip" aria-label="运行摘要"></div>
           <div class="graph-shell">
             <div class="graph-area">
               <div class="graph-toolbar">
-                <div id="graph-caption" class="toolbar-label"><strong>Execution graph</strong> · waiting for plan</div>
-                <button id="zoom-out" class="toolbar-btn" aria-label="Zoom out">−</button>
+                <div id="graph-caption" class="toolbar-label"><strong>执行图</strong> · 等待计划</div>
+                <button id="zoom-out" class="toolbar-btn" aria-label="缩小">−</button>
                 <span id="zoom-value" class="zoom-value mono">100%</span>
-                <button id="zoom-in" class="toolbar-btn" aria-label="Zoom in">+</button>
-                <button id="fit-view" class="toolbar-btn">Fit to view</button>
-                <button id="recenter" class="toolbar-btn">Recenter</button>
-                <select id="edge-select" class="edge-select" aria-label="Inspect an edge"><option value="">Inspect edge…</option></select>
+                <button id="zoom-in" class="toolbar-btn" aria-label="放大">+</button>
+                <button id="fit-view" class="toolbar-btn">适应视图</button>
+                <button id="recenter" class="toolbar-btn">回到中心</button>
+                <select id="edge-select" class="edge-select" aria-label="检查一条边"><option value="">检查 Edge…</option></select>
               </div>
-              <div id="graph-scroll" class="graph-scroll" tabindex="0" aria-label="Execution graph canvas. Use arrow keys to pan.">
-                <div id="graph-stage" class="graph-stage"><div id="graph-canvas" class="graph-canvas"><svg id="dag" class="edges" aria-hidden="true"></svg><div id="edge-labels"></div><div id="graph-nodes"></div><button id="mini-map" class="mini-map" aria-label="Recenter graph"></button></div></div>
+              <div id="graph-scroll" class="graph-scroll" tabindex="0" aria-label="执行图画布，可使用方向键平移。">
+                <div id="graph-stage" class="graph-stage"><div id="graph-canvas" class="graph-canvas"><svg id="dag" class="edges" aria-hidden="true"></svg><div id="edge-labels"></div><div id="graph-nodes"></div><button id="mini-map" class="mini-map" aria-label="执行图回到中心"></button></div></div>
                 <div id="graph-empty" class="empty-state" hidden><strong>Graph 计划尚未生成</strong><span>等待 graph-plan.json 落地。</span></div>
               </div>
             </div>
-            <aside id="graph-inspector" class="inspector" aria-label="Graph details">
-              <div class="inspector-head"><div><div id="inspector-kind" class="inspector-kind">Graph inspector</div><h2 id="inspector-title">Select a Node or Edge</h2></div><button id="clear-selection" class="icon-btn" aria-label="Clear graph selection">×</button></div>
+            <aside id="graph-inspector" class="inspector" aria-label="执行图详情">
+              <div class="inspector-head"><div><div id="inspector-kind" class="inspector-kind">执行图检查器</div><h2 id="inspector-title">选择一个 Node 或 Edge</h2></div><button id="clear-selection" class="icon-btn" aria-label="清除执行图选择">×</button></div>
               <div id="inspector-body" class="inspector-body"></div>
             </aside>
           </div>
         </section>
 
         <section id="view-tasks" class="view" aria-labelledby="tasks-heading">
-          <div class="page"><header class="page-head"><div class="page-title"><h1 id="tasks-heading">Tasks</h1><p>Contract scope, gate progress, and validation readiness by dependency wave.</p></div><div class="filters"><input id="task-search" class="search" placeholder="Search task, node, goal, module…" aria-label="Search tasks"><select id="task-status" class="filter-select" aria-label="Filter tasks by status"><option value="all">All statuses</option></select><select id="task-role" class="filter-select" aria-label="Filter tasks by agent type"><option value="all">All agent types</option></select><select id="task-type" class="filter-select" aria-label="Filter tasks by node type"><option value="all">All node types</option><option value="work">Work</option><option value="integration">Integration</option><option value="validation">Validation</option></select></div></header><div class="page-content"><div id="task-summary" class="subsummary"></div><div class="section-bar"><h2>Grouped by dependency wave</h2><span id="task-count" class="small muted">0 visible</span></div><div id="task-table" class="table-wrap"></div></div></div>
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="tasks-heading">任务</h1><p>按依赖波次查看契约范围、门禁进度与验证就绪情况。</p></div><div class="filters"><input id="task-search" class="search" placeholder="搜索 Task、Node、目标或模块…" aria-label="搜索任务"><select id="task-status" class="filter-select" aria-label="按状态筛选任务"><option value="all">全部状态</option></select><select id="task-role" class="filter-select" aria-label="按 Agent 类型筛选任务"><option value="all">全部 Agent 类型</option></select><select id="task-type" class="filter-select" aria-label="按 Node 类型筛选任务"><option value="all">全部 Node 类型</option><option value="work">工作</option><option value="integration">集成</option><option value="validation">验证</option></select></div></header><div class="page-content"><div id="task-summary" class="subsummary"></div><div class="section-bar"><h2>按依赖波次分组</h2><span id="task-count" class="small muted">显示 0 项</span></div><div id="task-table" class="table-wrap"></div></div></div>
         </section>
 
         <section id="view-artifacts" class="view" aria-labelledby="artifacts-heading">
-          <div class="page"><header class="page-head"><div class="page-title"><h1 id="artifacts-heading">Artifacts</h1><p>Planned contracts, immutable registry versions, and payload metadata.</p></div><div class="filters"><input id="artifact-search" class="search" placeholder="Search contract, artifact, path…" aria-label="Search artifacts"><select id="artifact-status" class="filter-select" aria-label="Filter artifacts by status"><option value="all">All statuses</option></select><select id="artifact-purpose" class="filter-select" aria-label="Filter artifacts by purpose"><option value="all">All purposes</option><option value="intermediate">Intermediate</option><option value="delivery">Delivery</option><option value="evidence">Evidence</option></select></div></header><div class="page-content"><div id="artifact-summary" class="subsummary"></div><div class="section-bar"><h2>Contract → immutable versions</h2><span id="artifact-count" class="small muted">0 contracts</span></div><div id="artifact-grid" class="artifact-grid"></div></div></div>
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="artifacts-heading">产物</h1><p>查看计划契约、注册表中的不可变版本与 Payload 元数据。</p></div><div class="filters"><input id="artifact-search" class="search" placeholder="搜索 Contract、Artifact 或路径…" aria-label="搜索产物"><select id="artifact-status" class="filter-select" aria-label="按状态筛选产物"><option value="all">全部状态</option></select><select id="artifact-purpose" class="filter-select" aria-label="按用途筛选产物"><option value="all">全部用途</option><option value="intermediate">中间产物</option><option value="delivery">交付产物</option><option value="evidence">验证证据</option></select></div></header><div class="page-content"><div id="artifact-summary" class="subsummary"></div><div class="section-bar"><h2>Contract → 不可变版本</h2><span id="artifact-count" class="small muted">0 个契约</span></div><div id="artifact-grid" class="artifact-grid"></div></div></div>
         </section>
 
         <section id="view-runs" class="view" aria-labelledby="runs-heading">
-          <div class="page"><header class="page-head"><div class="page-title"><h1 id="runs-heading">Runs / Agents</h1><p>Capacity occupancy, Agent Instances, Node Runs, and immutable attempts.</p></div><div class="filters"><input id="run-search" class="search" placeholder="Search agent, node run, artifact…" aria-label="Search runs"><select id="run-status" class="filter-select" aria-label="Filter runs by status"><option value="all">All statuses</option></select><select id="run-role" class="filter-select" aria-label="Filter runs by agent type"><option value="all">All agent types</option></select></div></header><div class="page-content"><div id="capacity-panel" class="capacity-panel"></div><div class="section-bar"><h2>Node run registry</h2><span id="run-count" class="small muted">0 runs</span></div><div id="run-table" class="table-wrap"></div></div></div>
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="runs-heading">运行 / Agent</h1><p>查看容量占用、Agent Instance、Node Run 与不可变执行尝试。</p></div><div class="filters"><input id="run-search" class="search" placeholder="搜索 Agent、Node Run 或 Artifact…" aria-label="搜索运行记录"><select id="run-status" class="filter-select" aria-label="按状态筛选运行记录"><option value="all">全部状态</option></select><select id="run-role" class="filter-select" aria-label="按 Agent 类型筛选运行记录"><option value="all">全部 Agent 类型</option></select></div></header><div class="page-content"><div id="capacity-panel" class="capacity-panel"></div><div class="section-bar"><h2>Node Run 注册表</h2><span id="run-count" class="small muted">0 条运行记录</span></div><div id="run-table" class="table-wrap"></div></div></div>
         </section>
 
         <section id="view-events" class="view" aria-labelledby="events-heading">
-          <div class="page"><header class="page-head"><div class="page-title"><h1 id="events-heading">Events</h1><p>Recent append-only factual transitions. Latest first, maximum 200.</p></div><div class="filters"><input id="event-search" class="search" placeholder="Search node, artifact, agent, message…" aria-label="Search events"><select id="event-type" class="filter-select" aria-label="Filter events by type"><option value="all">All event types</option></select></div></header><div class="page-content"><div class="section-bar"><h2>Factual event stream</h2><span id="event-count" class="small muted">0 events</span></div><div id="event-list" class="event-list"></div></div></div>
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="events-heading">事件</h1><p>只追加的事实状态变化，最新优先，最多显示 200 条。</p></div><div class="filters"><input id="event-search" class="search" placeholder="搜索 Node、Artifact、Agent 或消息…" aria-label="搜索事件"><select id="event-type" class="filter-select" aria-label="按类型筛选事件"><option value="all">全部事件类型</option></select></div></header><div class="page-content"><div class="section-bar"><h2>事实事件流</h2><span id="event-count" class="small muted">0 条事件</span></div><div id="event-list" class="event-list"></div></div></div>
         </section>
       </main>
     </section>
@@ -89,7 +89,7 @@
 
   <div id="scrim" class="scrim" hidden></div>
   <aside id="detail-drawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true">
-    <div class="drawer-head"><div><div id="drawer-kind" class="inspector-kind">Details</div><h2 id="drawer-title">Details</h2></div><button id="close-drawer" class="icon-btn" aria-label="Close details">×</button></div>
+    <div class="drawer-head"><div><div id="drawer-kind" class="inspector-kind">详情</div><h2 id="drawer-title">详情</h2></div><button id="close-drawer" class="icon-btn" aria-label="关闭详情">×</button></div>
     <div id="drawer-body" class="drawer-body"></div>
   </aside>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

@@ -27,8 +27,9 @@ test("server binds only IPv4 loopback and serves read-only APIs and assets",asyn
   const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
   const dashboard=await createDashboardServer({runDir:directory,port:0,interval:60_000}); t.after(()=>dashboard.close());
   assert.equal(dashboard.server.address().address,"127.0.0.1");
-  const page=await fetch(`${dashboard.url}/`); assert.equal(page.status,200); assert.match(await page.text(),/Orchestrate Parallel Work — Runtime Dashboard/);
+  const page=await fetch(`${dashboard.url}/`); assert.equal(page.status,200); assert.match(await page.text(),/Orchestrate Parallel Work — 编排控制台/);
   const css=await fetch(`${dashboard.url}/assets/styles.css`); assert.match(await css.text(),/prefers-reduced-motion/);
+  const font=await fetch(`${dashboard.url}/assets/fonts/NotoSansSC-UI.woff2`); assert.equal(font.status,200); assert.equal(font.headers.get("content-type"),"font/woff2"); assert.ok((await font.arrayBuffer()).byteLength>100_000);
   const app=await fetch(`${dashboard.url}/assets/app.js`); const appSource=await app.text(); assert.match(appSource,/createElementNS/); assert.match(appSource,/finalization-ack/); assert.match(appSource,/renderRuns/);
   const snapshot=await fetch(`${dashboard.url}/api/snapshot`); assert.equal(snapshot.status,200); assert.equal((await snapshot.json()).revision,7);
   const task=await fetch(`${dashboard.url}/api/tasks/task-1`); assert.equal(task.status,200); assert.equal((await task.json()).task.task_id,"task-1");
