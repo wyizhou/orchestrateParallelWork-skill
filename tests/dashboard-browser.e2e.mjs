@@ -67,6 +67,49 @@ const consoleErrors=[];
 page.on("console",(message)=>{if(message.type()==="error")consoleErrors.push(message.text());});
 page.on("pageerror",(error)=>consoleErrors.push(error.message));
 
+async function layoutReport(label) {
+  const report=await page.evaluate(()=>{
+    const visible=(node)=>{const style=getComputedStyle(node),rect=node.getBoundingClientRect();return style.display!=="none"&&style.visibility!=="hidden"&&rect.width>0&&rect.height>0;};
+    const rect=(selector)=>{const node=document.querySelector(selector);if(!node||!visible(node))return null;const box=node.getBoundingClientRect();return {left:box.left,top:box.top,right:box.right,bottom:box.bottom,width:box.width,height:box.height};};
+    const viewport={width:innerWidth,height:innerHeight};
+    const active=document.querySelector(".view.active");
+    const toolbar=document.querySelector(".graph-toolbar");
+    const toolbarChildren=toolbar?[...toolbar.children].filter(visible).map((node)=>{const box=node.getBoundingClientRect();return {text:node.textContent.trim(),left:box.left,top:box.top,right:box.right,bottom:box.bottom};}):[];
+    const toolbarBox=toolbar?.getBoundingClientRect();
+    return {
+      viewport,
+      documentOverflowX:document.documentElement.scrollWidth-innerWidth,
+      documentOverflowY:document.documentElement.scrollHeight-innerHeight,
+      navOverflow:document.querySelector("#primary-nav").scrollWidth-document.querySelector("#primary-nav").clientWidth,
+      activeView:active?.id,
+      activeRect:rect(".view.active"),
+      mainRect:rect(".main"),
+      topbarRect:rect(".topbar"),
+      sidebarRect:rect(".sidebar"),
+      toolbarRect:toolbarBox?{top:toolbarBox.top,bottom:toolbarBox.bottom,height:toolbarBox.height,scrollHeight:toolbar.scrollHeight}:null,
+      toolbarEscapes:toolbarBox?toolbarChildren.filter((item)=>item.top<toolbarBox.top-1||item.bottom>toolbarBox.bottom+1).map((item)=>item.text):[],
+      visibleDialogs:[...document.querySelectorAll('[role="dialog"],.inspector.open')].filter(visible).map((node)=>{const box=node.getBoundingClientRect();return {id:node.id,left:box.left,top:box.top,right:box.right,bottom:box.bottom};}),
+    };
+  });
+  assert.ok(report.documentOverflowX<=1,`${label}: document horizontal overflow ${JSON.stringify(report)}`);
+  assert.ok(report.documentOverflowY<=1,`${label}: document vertical overflow ${JSON.stringify(report)}`);
+  assert.ok(report.activeRect&&report.mainRect,`${label}: active view or main is not visible ${JSON.stringify(report)}`);
+  assert.ok(Math.abs(report.activeRect.left-report.mainRect.left)<=1&&Math.abs(report.activeRect.right-report.mainRect.right)<=1,`${label}: active view is horizontally offset ${JSON.stringify(report)}`);
+  if(report.viewport.width<=1023)assert.ok(report.navOverflow<=1,`${label}: primary navigation requires horizontal scrolling ${JSON.stringify(report)}`);
+  if(report.activeView==="view-graph")assert.deepEqual(report.toolbarEscapes,[],`${label}: graph toolbar controls escape their row ${JSON.stringify(report)}`);
+  for(const dialog of report.visibleDialogs){assert.ok(dialog.left>=-1&&dialog.top>=-1&&dialog.right<=report.viewport.width+1&&dialog.bottom<=report.viewport.height+1,`${label}: inspector or drawer escapes viewport ${JSON.stringify(report)}`);}
+  return report;
+}
+
+async function waitForPanelSettled(selector) {
+  await page.waitForFunction((target)=>{
+    const node=document.querySelector(target);
+    if(!node)return false;
+    const box=node.getBoundingClientRect();
+    return box.left>=-1&&box.top>=-1&&box.right<=innerWidth+1&&box.bottom<=innerHeight+1;
+  },selector);
+}
+
 try {
   await page.goto(dashboard.url,{waitUntil:"networkidle"});
   assert.equal(await page.evaluate(async()=>{await document.fonts.ready;return document.fonts.check('14px "OPW Noto Sans SC"');}),true);
@@ -75,6 +118,9 @@ try {
   assert.equal(await page.locator(".node").count(),6);
   assert.equal(await page.locator(".edge-label").count(),6);
   assert.match(await page.locator(".node.active,.node.running").first().evaluate((node)=>getComputedStyle(node).animationName),/nodePulse/);
+  await page.emulateMedia({reducedMotion:"reduce"});
+  assert.equal(await page.locator(".node.active,.node.running").first().evaluate((node)=>getComputedStyle(node).animationName),"none");
+  await page.emulateMedia({reducedMotion:"no-preference"});
 
   await page.locator('.node[data-node-id="api"]').click();
   await page.locator("#inspector-title").filter({hasText:"Build snapshot API"}).waitFor();
@@ -99,8 +145,54 @@ try {
   await page.getByRole("button",{name:/事件/}).click();
   assert.equal(await page.locator(".event").count(),3);
 
+  const viewports=[
+    [1920,1080],[1440,1024],[1280,900],[1279,900],[1024,768],[1023,768],
+    [768,768],[767,768],[560,720],[430,720],[429,720],[390,844],[320,568],
+  ];
+  const views=["graph","tasks","artifacts","runs","events"];
+  for(const [width,height] of viewports){
+    await page.setViewportSize({width,height});
+    for(const view of views){
+      await page.locator(`[data-view="${view}"]`).click();
+      await layoutReport(`${width}x${height}/${view}`);
+      if(width===1280||width===390)await page.screenshot({path:path.join(evidenceDir,`${width}-${view}.png`),fullPage:true});
+    }
+    if([1920,1280,1024,768,430,320].includes(width))await page.screenshot({path:path.join(evidenceDir,`matrix-${width}.png`),fullPage:true});
+  }
+
+  await page.setViewportSize({width:320,height:568});
+  await page.locator('[data-view="graph"]').click();
+  await page.locator("#zoom-in").click();
+  await page.locator("#zoom-value").filter({hasText:"110%"}).waitFor();
+  await page.locator("#fit-view").click();
+  await page.locator("#recenter").click();
+  await page.locator("#edge-select").selectOption({index:1});
+  await page.locator("#inspector-kind").filter({hasText:"Edge"}).waitFor();
+  await waitForPanelSettled("#graph-inspector");
+  await layoutReport("320x568/mobile-edge-inspector");
+  await page.locator("#clear-selection").click();
+  await page.locator('.node[data-node-id="api"]').click();
+  await waitForPanelSettled("#graph-inspector");
+  await layoutReport("320x568/mobile-node-inspector");
+  await page.locator("#clear-selection").click();
+  await page.locator('[data-view="tasks"]').click();
+  await page.locator("#task-table tbody tr[data-id]").first().click();
+  await waitForPanelSettled("#detail-drawer");
+  await layoutReport("320x568/mobile-task-drawer");
+  await page.keyboard.press("Escape");
+  await page.locator('[data-view="artifacts"]').click();
+  await page.locator(".version").first().click();
+  await waitForPanelSettled("#detail-drawer");
+  await layoutReport("320x568/mobile-artifact-drawer");
+  await page.keyboard.press("Escape");
+  await page.locator('[data-view="runs"]').click();
+  await page.locator("#run-table tbody tr[data-id]").first().click();
+  await waitForPanelSettled("#detail-drawer");
+  await layoutReport("320x568/mobile-run-drawer");
+  await page.keyboard.press("Escape");
+
   await page.setViewportSize({width:390,height:844});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
+  await page.locator('[data-view="events"]').click();
   await page.screenshot({path:path.join(evidenceDir,"mobile-events.png"),fullPage:true});
   await page.setViewportSize({width:1440,height:1024});
   await page.locator('[data-view="graph"]').click();
