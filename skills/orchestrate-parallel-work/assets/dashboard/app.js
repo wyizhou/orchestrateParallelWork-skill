@@ -1,184 +1,238 @@
-const $ = (selector) => document.querySelector(selector);
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const TERMINAL_LABELS = { completed:"Run complete", failed:"Run failed", cancelled:"Run cancelled", rejected:"Plan rejected", revoked:"Plan revoked", superseded:"Plan superseded" };
+const NODE_STATUSES = ["planned","blocked","ready","active","running","submitted","accepted","integrated","failed","stale","skipped","cancelled"];
+const GATE_SYMBOLS = { passed:"✓",failed:"!",pending:"…",stale:"◇","exception approved":"※" };
+const clientId = globalThis.crypto?.randomUUID?.() ?? `dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 let snapshot;
+let selected = null;
+let activeView = "graph";
+let zoom = 1;
 let polling;
+let eventSource;
 let terminalState;
 let terminalSync;
-const dashboardClientId = globalThis.crypto?.randomUUID?.() ?? `dashboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const terminalLabels = { completed:"Run complete", failed:"Run failed", cancelled:"Run cancelled", rejected:"Plan rejected", revoked:"Plan revoked", superseded:"Plan superseded" };
+let drawerTrigger;
+let toastTimer;
+let connectionState = "connecting";
 
-function element(name, attributes = {}, text) {
-  const node = document.createElement(name);
-  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-  if (text !== undefined) node.textContent = text;
+function element(tag, { className, text, attrs = {}, dataset = {} } = {}, children = []) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  for (const [key, value] of Object.entries(attrs)) if (value !== undefined && value !== null) node.setAttribute(key, String(value));
+  for (const [key, value] of Object.entries(dataset)) node.dataset[key] = String(value);
+  const values = Array.isArray(children) ? children : [children];
+  for (const child of values) if (child !== undefined && child !== null) node.append(child instanceof Node ? child : document.createTextNode(String(child)));
   return node;
 }
 
-function svgElement(name, attributes = {}, text) {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
-  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-  if (text !== undefined) node.textContent = text;
+function svgElement(tag, attrs = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
   return node;
 }
 
-function idOf(item, ...keys) {
-  for (const key of keys) if (item?.[key] !== undefined) return String(item[key]);
-  return "unknown";
+function idOf(value, ...keys) {
+  for (const key of keys) if (value?.[key] !== undefined) return String(value[key]);
+  return "";
 }
 
-function openDrawer(title, value) {
-  $("#drawer-title").textContent = title;
-  $("#drawer-content").textContent = JSON.stringify(value, null, 2);
-  $("#drawer").classList.add("open");
+function arrayValue(value, ...keys) {
+  if (Array.isArray(value)) return value;
+  for (const key of keys) if (Array.isArray(value?.[key])) return value[key];
+  return [];
 }
 
-function cards(target, values, detail) {
-  target.replaceChildren();
-  const shell = element("div", { class: "cards" });
-  for (const value of values) {
-    const id = idOf(value, "task_id", "artifact_id", "node_id", "id", "event_id");
-    const card = element("button", { class: "card" });
-    card.append(element("strong", {}, id), element("small", {}, value.status ?? value.artifact_type ?? value.agent_role ?? value.type ?? ""));
-    card.addEventListener("click", () => openDrawer(id, detail(value)));
-    shell.append(card);
+function statusName(value) { return String(value ?? "planned").toLowerCase().replaceAll("_", " "); }
+function statusClass(value) { return statusName(value).replaceAll(" ", "_"); }
+function pretty(value) { return String(value ?? "Unknown").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function displayTime(value) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toISOString().replace("T", " ").replace(".000Z", "Z"); }
+function short(value, length = 22) { const text = String(value ?? "—"); return text.length > length ? `${text.slice(0, length - 1)}…` : text; }
+function terminalLabel(phase) { return TERMINAL_LABELS[statusClass(phase)] ?? "Run finished"; }
+
+function status(value) { return element("span", { className:`status ${statusClass(value)}`, text:pretty(value) }); }
+function tag(value) { return element("span", { className:"tag", text:value }); }
+function tags(values) { return element("div", { className:"tag-list" }, arrayValue(values).map((value) => tag(typeof value === "string" ? value : JSON.stringify(value)))); }
+function raw(value) { const details=element("details",{className:"raw"}); details.append(element("summary",{text:"Raw JSON"}),element("pre",{text:JSON.stringify(value,null,2)})); return details; }
+
+function kv(pairs) {
+  const list = element("dl", { className:"kv" });
+  for (const [label, value] of pairs) {
+    list.append(element("dt", { text:label }));
+    const content = value instanceof Node ? value : element("span", { text:value ?? "—" });
+    list.append(element("dd", {}, content));
   }
-  target.append(shell);
+  return list;
 }
 
-function layout(nodes, edges) {
-  const ids = new Set(nodes.map((node) => node.id));
-  const incoming = new Map(nodes.map((node) => [node.id, 0]));
-  const outgoing = new Map(nodes.map((node) => [node.id, []]));
-  for (const edge of edges) {
-    const from = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? "");
-    const to = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
-    if (ids.has(from) && ids.has(to)) { incoming.set(to, incoming.get(to) + 1); outgoing.get(from).push(to); }
+function section(title, ...children) { return element("section",{className:"inspect-section"},[element("h3",{text:title}),...children.flat()]); }
+function showToast(message) { const toast=$("#toast"); toast.textContent=message; toast.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.remove("show"),1800); }
+async function copyText(value, label="Value") { try { await navigator.clipboard.writeText(String(value)); showToast(`${label} copied`); } catch { showToast(String(value)); } }
+
+function setConnection(state, label = pretty(state)) {
+  connectionState = state;
+  const target=$("#connection");
+  target.className=`pill ${statusClass(state)}`;
+  target.textContent=label;
+}
+
+function runId() { return snapshot?.run?.execution_run_id ?? snapshot?.run?.run_id ?? snapshot?.state?.execution_run_id ?? "Observed run"; }
+function planId() { return snapshot?.graph?.plan_id ?? snapshot?.run?.plan_id ?? snapshot?.approval?.plan_id ?? "—"; }
+function planVersion() { return snapshot?.graph?.plan_version ?? snapshot?.approval?.plan_version; }
+function taskId(task) { return idOf(task,"task_id","id"); }
+function runNodeId(run) { return idOf(run,"node_id","task_id","id"); }
+function artifactContractId(item) { return idOf(item,"artifact_contract_id","artifact_id","id"); }
+function actualArtifactId(item) { return idOf(item,"artifact_id","id","artifact_contract_id"); }
+function nodeById(id) { return snapshot?.graph?.nodes?.find((node)=>idOf(node,"id","node_id")===String(id)); }
+function taskByNode(node) { const ref=String(node?.task_ref ?? node?.task_id ?? idOf(node,"id","node_id")); return snapshot?.tasks?.find((task)=>taskId(task)===ref || idOf(task,"node_id")===idOf(node,"id","node_id")); }
+function runsForNode(id) { return (snapshot?.node_runs ?? []).filter((run)=>runNodeId(run)===String(id)).sort((a,b)=>(b.attempt??0)-(a.attempt??0)); }
+function latestRun(id) { return runsForNode(id)[0] ?? null; }
+function contractById(id) { return snapshot?.artifact_contracts?.find((item)=>artifactContractId(item)===String(id)); }
+function registryForContract(id) { return (snapshot?.artifact_registry ?? []).filter((item)=>String(item.artifact_contract_id ?? actualArtifactId(item))===String(id)).sort((a,b)=>(b.artifact_version??0)-(a.artifact_version??0)); }
+function payloadForArtifact(entry, contractId) { return snapshot?.artifacts?.find((item)=>actualArtifactId(item)===actualArtifactId(entry) || String(item.artifact_contract_id??"")===String(contractId)) ?? null; }
+
+function graphModel() {
+  const nodes=snapshot?.graph?.nodes ?? [], edges=snapshot?.graph?.edges ?? [];
+  const ids=new Set(nodes.map((node)=>idOf(node,"id","node_id")));
+  const indegree=new Map([...ids].map((id)=>[id,0])); const outgoing=new Map([...ids].map((id)=>[id,[]]));
+  for (const edge of edges) { const from=idOf(edge.from,"node_id","node")||String(edge.from??""); const to=idOf(edge.to,"node_id","node")||String(edge.to??""); if(ids.has(from)&&ids.has(to)){outgoing.get(from).push(to);indegree.set(to,indegree.get(to)+1);} }
+  const queue=[...indegree].filter(([,degree])=>degree===0).map(([id])=>id).sort(); const levels=new Map(queue.map((id)=>[id,0]));
+  while(queue.length){const id=queue.shift();for(const target of outgoing.get(id).sort()){levels.set(target,Math.max(levels.get(target)??0,(levels.get(id)??0)+1));indegree.set(target,indegree.get(target)-1);if(indegree.get(target)===0){queue.push(target);queue.sort();}}}
+  for(const id of ids) if(!levels.has(id)) levels.set(id,0);
+  const columns=new Map(); for(const node of nodes){const id=idOf(node,"id","node_id"),level=levels.get(id);if(!columns.has(level))columns.set(level,[]);columns.get(level).push(node);} for(const column of columns.values())column.sort((a,b)=>idOf(a,"id","node_id").localeCompare(idOf(b,"id","node_id")));
+  const maxRows=Math.max(1,...[...columns.values()].map((column)=>column.length)); const height=Math.max(520,90+maxRows*190); const maxLevel=Math.max(0,...levels.values()); const width=Math.max(760,100+(maxLevel+1)*280);
+  const positions=new Map(); for(const [level,column] of columns){const columnHeight=column.length*190-48;const start=Math.max(70,(height-columnHeight)/2);column.forEach((node,index)=>positions.set(idOf(node,"id","node_id"),{x:50+level*280,y:start+index*190,level}));}
+  return {nodes,edges,levels,columns,positions,width,height,maxLevel,outgoing};
+}
+
+function gateState(run, gate) {
+  const direct=run?.[`${gate}_status`]; if(direct) return statusName(direct);
+  const check=arrayValue(run?.self_checks).find((item)=>item.gate===`${gate}_gate`); return statusName(check?.status ?? "pending");
+}
+function gateBadge(label,value){const state=statusName(value);return element("b",{className:`gate ${statusClass(state)}`,text:`${label}${GATE_SYMBOLS[state]??"—"}`,attrs:{title:`${label}: ${pretty(state)}`}});}
+
+function renderGlobal() {
+  $("#run-id").firstChild?.remove(); $("#run-id").prepend(document.createTextNode(`${runId()} `));
+  $("#plan-value").textContent=`${planId()}${planVersion()?` · v${planVersion()}`:""}`;
+  $("#revision-value").textContent=`r${snapshot.revision ?? 0}`; $("#updated-value").textContent=displayTime(snapshot.updated_at);
+  const approval=snapshot.approval?.status ?? (snapshot.phase==="awaiting_user_approval"?"awaiting_user_approval":"unknown"); $("#approval-pill").className=`pill ${statusClass(approval)}`; $("#approval-pill").textContent=pretty(approval);
+  $("#phase-pill").className=`pill ${statusClass(snapshot.phase)}`; $("#phase-pill").textContent=pretty(snapshot.phase);
+  const counts={nodes:snapshot.counts.nodes,tasks:snapshot.counts.tasks,artifacts:snapshot.counts.planned_artifacts,runs:snapshot.node_runs.length,events:snapshot.events.length}; for(const [key,value] of Object.entries(counts)) $(`[data-count="${key}"]`).textContent=String(value).padStart(key==="events"?1:2,"0");
+  renderBanner();
+}
+
+function renderBanner() {
+  const banner=$("#banner"); const messages=[];
+  if(snapshot.health?.last_error) messages.push(`Snapshot degraded · ${snapshot.health.last_error}. Showing last valid revision r${snapshot.revision}.`);
+  if(snapshot.phase==="awaiting_user_approval") messages.push("Read-only plan preview · Awaiting approval in the Agent conversation. No execution starts from this page.");
+  if(snapshot.issues?.length) messages.push(`Graph diagnostics · ${snapshot.issues.join(" · ")}`);
+  if(messages.length){banner.hidden=false;banner.replaceChildren(element("strong",{text:snapshot.health?.last_error?"Degraded":"Control plane notice"}),element("span",{text:messages.join(" ")}));}else banner.hidden=true;
+}
+
+function summaryItem(label,value,wide=false,extra=null){const item=element("div",{className:`summary-item${wide?" wide":""}`},[element("div",{className:"summary-label",text:label}),element("div",{className:"summary-value",text:value})]);if(extra)item.append(extra);return item;}
+function renderSummary(model) {
+  const capacity=snapshot.capacity.effective; const cap=element("div",{className:"capacity-mini",attrs:{"aria-label":capacity?`${snapshot.counts.agent_instances} of ${capacity} active`:"Capacity unknown"}});
+  for(let i=0;i<(capacity??0);i++)cap.append(element("i",{className:i<snapshot.counts.agent_instances?"on":""}));
+  $("#summary").replaceChildren(
+    summaryItem("Agent roles",snapshot.counts.agent_roles),summaryItem("Active agents",snapshot.counts.agent_instances),summaryItem("Nodes / Edges",`${snapshot.counts.nodes} / ${snapshot.counts.edges}`),summaryItem("Tasks",snapshot.counts.tasks),
+    summaryItem("Artifacts planned / accepted",`${snapshot.counts.planned_artifacts} / ${snapshot.counts.generated_artifacts}`,true),summaryItem("Effective capacity",capacity===null?"Unknown":`${snapshot.counts.agent_instances} active / ${capacity}`,true,cap),
+    summaryItem("Shape",snapshot.graph.summary?.execution_shape?pretty(snapshot.graph.summary.execution_shape):model.maxLevel===0?"Parallel":model.columns.size===model.nodes.length?"Serial":"Hybrid"),summaryItem("Phase",pretty(snapshot.phase))
+  );
+}
+
+function edgeEndpoints(edge){return {from:idOf(edge.from,"node_id","node")||String(edge.from??""),to:idOf(edge.to,"node_id","node")||String(edge.to??"")};}
+function edgeArtifactId(edge){return String(edge.artifact_contract_ref ?? edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");}
+
+function renderGraph() {
+  const model=graphModel(); renderSummary(model); const canvas=$("#graph-canvas"),stage=$("#graph-stage"),svg=$("#dag"),labels=$("#edge-labels"),nodesTarget=$("#graph-nodes");
+  canvas.style.width=`${model.width}px`;canvas.style.height=`${model.height}px`;svg.setAttribute("viewBox",`0 0 ${model.width} ${model.height}`);svg.setAttribute("width",model.width);svg.setAttribute("height",model.height);stage.style.width=`${model.width*zoom}px`;stage.style.height=`${model.height*zoom}px`;canvas.style.transform=`scale(${zoom})`;
+  $$(".wave",canvas).forEach((item)=>item.remove()); for(let level=0;level<=model.maxLevel;level++){const wave=element("div",{className:"wave"},element("span",{text:`Wave ${level}${model.columns.get(level)?.length>1?" · parallel":""}`}));wave.style.left=`${30+level*280}px`;canvas.prepend(wave);}
+  const defs=svgElement("defs"); const marker=svgElement("marker",{id:"arrow",viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:6,markerHeight:6,orient:"auto-start-reverse"});marker.append(svgElement("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"context-stroke"}));const active=marker.cloneNode(true);active.id="arrow-active";defs.append(marker,active);svg.replaceChildren(defs);labels.replaceChildren();nodesTarget.replaceChildren();
+  const relatedNodes=new Set(); const relatedEdges=new Set(); if(selected?.kind==="node"){for(const edge of model.edges){const {from,to}=edgeEndpoints(edge);if(from===selected.id||to===selected.id){relatedNodes.add(from);relatedNodes.add(to);relatedEdges.add(idOf(edge,"id","edge_id"));}}}
+  for(const edge of model.edges){const id=idOf(edge,"id","edge_id"),{from,to}=edgeEndpoints(edge),a=model.positions.get(from),b=model.positions.get(to);if(!a||!b)continue;const path=svgElement("path",{id:`edge-${id}`,class:`edge-path ${statusClass(edge.status)} ${edge.kind==="control"?"control":""} ${selected?.kind==="edge"&&selected.id===id?"selected":""} ${relatedEdges.has(id)?"related":""}`,d:`M ${a.x+224} ${a.y+71} C ${a.x+254} ${a.y+71}, ${b.x-30} ${b.y+71}, ${b.x} ${b.y+71}`});svg.append(path);
+    const artifact=edgeArtifactId(edge);const label=element("button",{className:`edge-label ${selected?.kind==="edge"&&selected.id===id?"selected":""} ${relatedEdges.has(id)?"related":""}`,text:edge.kind==="control"?`${from} → ${to} · control`:artifact||`${from} → ${to}`,attrs:{"aria-label":`Inspect edge ${from} to ${to}, ${pretty(edge.status)}`},dataset:{edgeId:id}});label.style.left=`${(a.x+b.x+224)/2-Math.min(85,(artifact.length||12)*3)}px`;label.style.top=`${(a.y+b.y)/2+48}px`;label.addEventListener("click",()=>selectEntity("edge",id));labels.append(label);
   }
-  const levels = new Map();
-  const queue = [...incoming].filter(([, count]) => count === 0).map(([id]) => id);
-  for (const id of queue) levels.set(id, 0);
-  while (queue.length) {
-    const id = queue.shift();
-    for (const target of outgoing.get(id)) {
-      levels.set(target, Math.max(levels.get(target) ?? 0, levels.get(id) + 1));
-      incoming.set(target, incoming.get(target) - 1);
-      if (incoming.get(target) === 0) queue.push(target);
-    }
+  for(const node of model.nodes){const id=idOf(node,"id","node_id"),point=model.positions.get(id),task=taskByNode(node),run=latestRun(id),nodeStatus=statusName(node.status),type=statusName(node.node_type??"work");const button=element("button",{className:`node ${statusClass(nodeStatus)} ${type} ${selected?.kind==="node"&&selected.id===id?"selected":""} ${relatedNodes.has(id)?"related":""}`,attrs:{"aria-label":`${id}, ${task?.goal??taskId(task)??"Task"}, ${pretty(nodeStatus)}, Test ${gateState(run,"test")}, Lint ${gateState(run,"lint")}, Validator ${pretty(node.validator_status??"pending")}`},dataset:{nodeId:id}});button.style.left=`${point.x}px`;button.style.top=`${point.y}px`;
+    const top=element("span",{className:"node-top"},[element("span",{className:"node-id",text:`${id} · ${type.toUpperCase()}`}),status(nodeStatus)]);const title=element("span",{className:"node-title",text:task?.goal??taskId(task)??id});const role=element("span",{className:"node-role",text:`${node.agent_type_id??node.agent_type??task?.agent_type_id??"Unassigned"} · ${taskId(task)||node.task_ref||"—"}`});const gates=element("span",{className:"gate-row"},[gateBadge("T",gateState(run,"test")),gateBadge("L",gateState(run,"lint")),gateBadge("V",node.validator_status??run?.validator_status??"pending")]);const meta=element("span",{className:"node-meta"},[gates,element("span",{className:"attempt",text:`a${run?.attempt??0}`}),element("span",{className:"node-agent mono muted",text:run?.agent_instance_id??"agent: unassigned"}),element("span",{className:"muted",text:run?.ended_at?short(displayTime(run.ended_at),12):run?.started_at?short(displayTime(run.started_at),12):"—"})]);button.append(top,title,role,meta);button.addEventListener("click",()=>selectEntity("node",id));nodesTarget.append(button);
   }
-  for (const node of nodes) if (!levels.has(node.id)) levels.set(node.id, 0);
-  const columns = new Map();
-  for (const node of nodes) { const level = levels.get(node.id); if (!columns.has(level)) columns.set(level, []); columns.get(level).push(node.id); }
-  const positions = new Map();
-  for (const [level, column] of columns) column.forEach((id, row) => positions.set(id, { x: 60 + level * 260, y: 60 + row * 150 }));
-  return positions;
+  renderMiniMap(model); renderEdgeSelector(model); $("#graph-caption").innerHTML=""; $("#graph-caption").append(element("strong",{text:"Execution graph"}),document.createTextNode(` · left-to-right · ${model.maxLevel+1} waves`));$("#graph-empty").hidden=model.nodes.length>0; canvas.classList.toggle("has-selection",Boolean(selected));
+  if(selected?.kind==="node"&&!nodeById(selected.id))selected=null;if(selected?.kind==="edge"&&!model.edges.some((edge)=>idOf(edge,"id","edge_id")===selected.id))selected=null;renderInspector();
 }
 
-function drawGraph(graph) {
-  const svg = $("#dag");
-  svg.replaceChildren();
-  const nodes = graph.nodes ?? [], edges = graph.edges ?? [], positions = layout(nodes, edges);
-  const width = Math.max(760, ...[...positions.values()].map((p) => p.x + 240));
-  const height = Math.max(520, ...[...positions.values()].map((p) => p.y + 130));
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  const defs = svgElement("defs");
-  const marker = svgElement("marker", { id:"arrow", viewBox:"0 0 10 10", refX:"9", refY:"5", markerWidth:"6", markerHeight:"6", orient:"auto-start-reverse" });
-  marker.append(svgElement("path", { d:"M 0 0 L 10 5 L 0 10 z", fill:"#64748b" })); defs.append(marker); svg.append(defs);
-  for (const edge of edges) {
-    const fromId = String(edge.from?.node_id ?? edge.from?.node ?? edge.from ?? ""), toId = String(edge.to?.node_id ?? edge.to?.node ?? edge.to ?? "");
-    const from = positions.get(fromId), to = positions.get(toId); if (!from || !to) continue;
-    const line = svgElement("path", { class:`edge ${edge.status ?? "waiting"}`, d:`M ${from.x + 180} ${from.y + 42} C ${from.x + 220} ${from.y + 42}, ${to.x - 40} ${to.y + 42}, ${to.x} ${to.y + 42}`, tabindex:"0" });
-    line.addEventListener("click", () => {
-      const artifactId = String(edge.artifact_contract_ref ?? edge.artifact_id ?? edge.artifact ?? edge.from?.output ?? "");
-      const artifact = snapshot.artifact_contracts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id") === artifactId);
-      openDrawer(`Edge ${fromId} → ${toId}`, { edge, artifact });
-    }); svg.append(line);
-  }
-  for (const node of nodes) {
-    const point = positions.get(node.id), group = svgElement("g", { class:`node ${node.status ?? "planned"}`, transform:`translate(${point.x} ${point.y})`, tabindex:"0", role:"button" });
-    group.append(svgElement("rect", { width:"180", height:"84" }), svgElement("text", { x:"14", y:"27" }, node.id), svgElement("text", { x:"14", y:"48", class:"role" }, node.agent_type_id ?? node.agent_type ?? node.agent_role ?? "unassigned"), svgElement("text", { x:"14", y:"69", class:"badge" }, `test:${node.test_status ?? "–"}  lint:${node.lint_status ?? "–"}  validator:${node.validator_status ?? "–"}`));
-    const show = () => { const taskId = String(node.task_ref ?? node.task_id ?? node.id); openDrawer(node.id, { node, task: snapshot.tasks.find((task) => idOf(task,"task_id","id") === taskId), run: snapshot.node_runs.find((run) => idOf(run,"node_id","task_id","id") === node.id) }); };
-    group.addEventListener("click", show); group.addEventListener("keydown", (event) => { if (["Enter"," "].includes(event.key)) show(); }); svg.append(group);
-  }
+function renderMiniMap(model){const map=$("#mini-map");map.replaceChildren();for(const node of model.nodes){const id=idOf(node,"id","node_id"),p=model.positions.get(id);const dot=element("i",{className:`mini-dot ${["active","running"].includes(statusName(node.status))?"active":""}`});dot.style.left=`${5+(p.x/model.width)*125}px`;dot.style.top=`${5+(p.y/model.height)*60}px`;map.append(dot);}}
+function renderEdgeSelector(model){const select=$("#edge-select"),value=selected?.kind==="edge"?selected.id:"";select.replaceChildren(element("option",{text:"Inspect edge…",attrs:{value:""}}));for(const edge of model.edges){const id=idOf(edge,"id","edge_id"),{from,to}=edgeEndpoints(edge);select.append(element("option",{text:`${from} → ${to} · ${edge.kind??"data"} · ${edge.status??"waiting"}`,attrs:{value:id}}));}select.value=value;}
+
+function renderInspector(){const body=$("#inspector-body");if(!snapshot){body.replaceChildren();return;}if(!selected){$("#inspector-kind").textContent="Graph inspector";$("#inspector-title").textContent="Run overview";body.replaceChildren(section("Control plane",kv([["Run ID",runId()],["Plan",`${planId()} · v${planVersion()??"—"}`],["Phase",pretty(snapshot.phase)],["Approval",pretty(snapshot.approval?.status)],["Revision",`r${snapshot.revision}`],["Connection",pretty(connectionState)]])),section("Diagnostics",kv([["Graph issues",snapshot.issues?.length?snapshot.issues.join(" · "):"None"],["Last error",snapshot.health?.last_error??"None"]])),raw({run:snapshot.run,state:snapshot.state,approval:snapshot.approval}));return;}if(selected.kind==="node")renderNodeInspector(selected.id);else renderEdgeInspector(selected.id);}
+
+function renderNodeInspector(id){const node=nodeById(id);if(!node)return;const task=taskByNode(node),runs=runsForNode(id),run=runs[0]??{},inputs=arrayValue(task?.inputs,task?.input),outputs=arrayValue(task?.outputs,task?.output);$("#inspector-kind").textContent=`${pretty(node.node_type??"work")} Node · ${pretty(node.status)}`;$("#inspector-title").textContent=task?.goal??id;
+  const children=[section("Overview",kv([["Node ID",id],["Node Type",pretty(node.node_type??"work")],["Status",status(node.status)],["Task ID",taskId(task)||node.task_ref],["Agent Type",node.agent_type_id??task?.agent_type_id],["Agent Instance",run.agent_instance_id??"Unassigned"],["Node Run ID",run.node_run_id??"—"],["Current Attempt",run.attempt??0],["Started At",displayTime(run.started_at)],["Ended At",displayTime(run.ended_at)],["Retry Policy",node.retry_policy?JSON.stringify(node.retry_policy):"—"]])),
+    section("Task contract",kv([["Goal",task?.goal??"—"],["Authoritative Inputs",arrayValue(task?.authoritative_inputs).join(" · ")||"—"],["Constraints",arrayValue(task?.constraints).join(" · ")||"—"],["Completion Criteria",arrayValue(task?.completion_criteria).join(" · ")||"—"],["Owned Scopes",arrayValue(task?.owned_scopes).join(" · ")||"—"],["Forbidden Scopes",arrayValue(task?.forbidden_scopes).join(" · ")||"—"],["External Effects",arrayValue(task?.allowed_external_effects).join(" · ")||"None"]]),tags([...(task?.feature_points??[]).map((item)=>item.id??item.expected_behavior),...(task?.modules??[]).map((item)=>item.name)])),
+    section("Inputs",inputs.length?inputs.map((input)=>kv([["Port",input.port],["Source / Cardinality",`${pretty(input.source)} · ${pretty(input.cardinality)} · ${input.required===false?"Optional":"Required"}`],["Artifact Contract",input.artifact_contract_ref??input.authoritative_input_ref??"—"]])):element("p",{className:"muted small",text:"No declared inputs."})),
+    section("Outputs",outputs.length?outputs.map((output)=>{const entries=registryForContract(output.artifact_contract_ref);return kv([["Port",output.port],["Artifact Contract",output.artifact_contract_ref],["Latest Artifact",actualArtifactId(entries[0])||"Not generated"],["Version / Status",entries[0]?`v${entries[0].artifact_version} · ${pretty(entries[0].status)}`:"Planned"]]);}):element("p",{className:"muted small",text:"No declared outputs."})),
+    section("Self validation",gateCard("Test gate",task?.self_validation?.test_gate,run,"test"),gateCard("Lint gate",task?.self_validation?.lint_gate,run,"lint")),
+    section("Validator",kv([["Validator Status",status(node.validator_status??run.validator_status??"pending")],["Validation ID",task?.validation_brief?.validation_id??"—"],["Feature Points",arrayValue(task?.validation_brief?.feature_points).map((item)=>item.id??item.expected_behavior).join(" · ")||"—"],["Modules",arrayValue(task?.validation_brief?.modules).map((item)=>item.name).join(" · ")||"—"],["Artifact Refs",arrayValue(task?.validation_brief?.artifact_refs).join(" · ")||"—"],["Verification Steps",arrayValue(task?.validation_brief?.verification_steps).join(" · ")||"—"]])),
+  ];
+  if(run.failure||node.status==="blocked")children.push(section("Failure / blocking",kv([["Failure Type",run.failure?.type??(node.status==="blocked"?"DependencyBlocked":"—")],["Factual Message",run.failure?.message??run.failure?.error??"Required predecessor or Artifact has not been accepted."],["Failed Step",run.failure?.step??"—"],["Last Successful State",run.failure?.last_successful_state??"—"]])));
+  children.push(section("Attempt history",runs.length?runs.map((item)=>kv([["Attempt",item.attempt],["Node Run ID",item.node_run_id],["Status",pretty(item.status)],["Agent",item.agent_instance_id],["Started / Ended",`${displayTime(item.started_at)} → ${displayTime(item.ended_at)}`]])):element("p",{className:"muted small",text:"No attempts recorded."})),raw({node,task,runs}));$("#inspector-body").replaceChildren(...children);
 }
 
-function render(value) {
-  snapshot = value;
-  const summary = $("#summary"); summary.replaceChildren();
-  const metrics = [["Agent roles",value.counts.agent_roles],["Active agents",value.counts.agent_instances],["Nodes",value.counts.nodes],["Edges",value.counts.edges],["Tasks",value.counts.tasks],["Planned artifacts",value.counts.planned_artifacts],["Generated artifacts",value.counts.generated_artifacts],["Capacity",value.capacity.effective === null ? "unknown" : `${value.capacity.effective}/15`],["Phase",value.phase]];
-  for (const [label, metric] of metrics) { const card=element("div",{class:"metric"}); card.append(element("strong",{},metric),element("span",{},label)); summary.append(card); }
-  drawGraph(value.graph);
-  cards($("#tasks"), value.tasks, (item) => item);
-  const artifactIds = new Set([...value.artifact_contracts, ...value.artifact_registry, ...value.artifacts].map((item) => idOf(item,"artifact_contract_id","artifact_id","id")));
-  const artifacts = [...artifactIds].map((id) => ({
-    ...(value.artifact_contracts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? {}),
-    artifact_id:id,
-    registry:value.artifact_registry.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? null,
-    payload:value.artifacts.find((item) => idOf(item,"artifact_contract_id","artifact_id","id")===id) ?? null,
-  }));
-  cards($("#artifacts"), artifacts, (item) => item);
-  cards($("#runs"), value.node_runs, (item) => item);
-  cards($("#events"), value.events, (item) => item);
-  const notice = $("#notice"); const messages = [...(value.issues ?? []), value.health?.last_error].filter(Boolean); notice.textContent = messages.join(" · "); notice.classList.toggle("show", messages.length > 0);
-}
+function gateCard(title,contract,run,gate){const state=gateState(run,gate),card=element("div",{className:"gate-card"});card.append(element("div",{className:"gate-card-top"},[element("strong",{text:title}),status(state)]),kv([["Mode",pretty(contract?.mode??"unknown")],["Steps",arrayValue(contract?.steps).join(" · ")||"—"],["Pass Condition",contract?.pass_condition??"—"],["Evidence",arrayValue(run?.self_checks).find((item)=>item.gate===`${gate}_gate`)?.evidence_ref??contract?.evidence_contract_ref??"—"],["Exit Code",arrayValue(run?.self_checks).find((item)=>item.gate===`${gate}_gate`)?.exit_code??"—"]]));return card;}
 
-async function refresh() {
-  try {
-    const response = await fetch("/api/snapshot", { cache:"no-store" });
-    if (!response.ok) throw new Error((await response.json()).error ?? `HTTP ${response.status}`);
-    const value = await response.json();
-    render(value);
-    if (!terminalState) {
-      $("#connection").textContent="Live";
-      $("#connection").classList.add("live");
-    }
-    return value;
-  } catch (error) { $("#connection").textContent="Waiting"; $("#connection").classList.remove("live"); $("#notice").textContent=error.message; $("#notice").classList.add("show"); }
-}
+function renderEdgeInspector(id){const edge=snapshot.graph.edges.find((item)=>idOf(item,"id","edge_id")===id);if(!edge)return;const {from,to}=edgeEndpoints(edge),contractId=edgeArtifactId(edge),contract=contractById(contractId),entries=registryForContract(contractId),entry=entries[0],payload=payloadForArtifact(entry,contractId);$("#inspector-kind").textContent=`${pretty(edge.kind??"data")} Edge · ${pretty(edge.status)}`;$("#inspector-title").textContent=id;$("#inspector-body").replaceChildren(section("Edge overview",kv([["Edge ID",id],["Edge Kind",pretty(edge.kind??"data")],["From / Port",`${from} / ${edge.from?.port??"—"}`],["To / Port",`${to} / ${edge.to?.port??"—"}`],["Status",status(edge.status)]])),edge.kind==="control"?section("Artifact contract",element("p",{className:"muted small",text:"No Artifact Payload"})):section("Artifact contract",kv([["Contract",contractId||"Unavailable"],["Artifact Type",contract?.artifact_type??"Unavailable"],["Purpose",pretty(contract?.purpose??"unknown")],["Schema Version",contract?.schema_version??"—"],["Delivery Format",contract?.delivery?.format??"—"],["Delivery Path",contract?.delivery?.path??"—"],["Producer",contract?.producer?`${contract.producer.node_id} / ${contract.producer.port}`:from],["Consumers",arrayValue(contract?.consumers).map((item)=>`${item.node_id} / ${item.port}`).join(" · ")||to]])),section("Registry delivery",kv([["Actual Artifact",actualArtifactId(entry)||"Not generated"],["Current Version",entry?.artifact_version?`v${entry.artifact_version}`:"—"],["Digest",entry?.digest??"—"],["Delivery Status",pretty(entry?.status??edge.status)],["URI",entry?.uri??payload?.uri??"—"],["Files",arrayValue(entry?.files??payload?.files).map((item)=>typeof item==="string"?item:item.path).join(" · ")||"—"],["Validation Evidence",arrayValue(entry?.validation_evidence_refs).join(" · ")||"—"]])),raw({edge,contract,registry:entries,payload}));}
 
-function startPolling() { if (!polling && !terminalState) polling=setInterval(refresh,2000); }
-function stopPolling() { if (polling) clearInterval(polling); polling=undefined; }
-function showStopped(event) {
-  const shutdown = event?.data ? JSON.parse(event.data) : {};
-  terminalState = { ...(terminalState ?? {}), ...shutdown, stopped:true };
-  stopPolling();
-  events.close();
-  $("#connection").textContent=`${terminalLabels[terminalState.phase] ?? "Server"} · Server stopped`;
-  $("#connection").classList.remove("live");
-}
+function selectEntity(kind,id){selected={kind,id:String(id)};renderGraph();if(innerWidth<1280)$("#graph-inspector").classList.add("open");}
 
-async function synchronizeTerminalState(event) {
-  if (terminalSync) return terminalSync;
-  const terminal = JSON.parse(event.data);
-  terminalState = { ...terminal, stopped:false };
-  stopPolling();
-  $("#connection").textContent="Finalizing · syncing final snapshot";
-  $("#connection").classList.add("live");
-  terminalSync = (async () => {
-    const value = await refresh();
-    if (!value || value.revision !== terminal.revision || value.phase !== terminal.phase) throw new Error("Final snapshot revision does not match the terminal event");
-    $("#connection").textContent=`${terminalLabels[terminal.phase] ?? "Run finished"} · stopping server`;
-    const response = await fetch("/api/finalization-ack", {
-      method:"POST",
-      headers:{ "x-dashboard-client-id":dashboardClientId, "x-dashboard-revision":String(terminal.revision) },
-    });
-    if (!response.ok) throw new Error((await response.json()).error ?? `Finalization acknowledgement failed: HTTP ${response.status}`);
-  })().catch((error) => {
-    $("#connection").textContent="Finalizing · waiting for shutdown";
-    $("#connection").classList.remove("live");
-    $("#notice").textContent=error.message;
-    $("#notice").classList.add("show");
-  });
-  return terminalSync;
-}
+function uniqueOptions(select,values,label){const current=select.value;select.replaceChildren(element("option",{text:label,attrs:{value:"all"}}),...([...new Set(values.filter(Boolean).map(String))].sort().map((value)=>element("option",{text:pretty(value),attrs:{value:statusName(value)}}))));select.value=$$("option",select).some((item)=>item.value===current)?current:"all";}
+function filterValue(id){return $(id).value.trim().toLowerCase();}
+function table(headers,rows,widths=[]){const table=element("table",{className:"data-table"}),thead=element("thead"),head=element("tr");headers.forEach((label,index)=>{const th=element("th",{text:label,attrs:{scope:"col"}});if(widths[index])th.style.width=widths[index];head.append(th);});thead.append(head);const tbody=element("tbody");for(const row of rows)tbody.append(row);table.append(thead,tbody);return table;}
+function cell(label,value,className=""){const td=element("td",{className,text:value??"—",attrs:{"data-label":label}});return td;}
+function interactiveRow(id,cells,onOpen){const row=element("tr",{attrs:{tabindex:"0"},dataset:{id}});row.append(...cells);row.addEventListener("click",onOpen);row.addEventListener("keydown",(event)=>{if(["Enter"," "].includes(event.key)){event.preventDefault();onOpen(event);}});return row;}
+function emptyTableRow(columns,message){const row=element("tr");row.append(element("td",{className:"empty-row",text:message,attrs:{colspan:columns}}));return row;}
+function summaryGroup(items){return items.map(([value,label])=>element("div",{},[element("strong",{text:value}),element("span",{text:label})]));}
 
-const events = new EventSource(`/api/events?client_id=${encodeURIComponent(dashboardClientId)}`);
-events.addEventListener("revision", () => { stopPolling(); void refresh(); });
-events.addEventListener("terminal", (event) => void synchronizeTerminalState(event));
-events.addEventListener("shutdown", showStopped);
-events.onopen = () => { stopPolling(); if (!terminalState) { $("#connection").textContent="Live"; $("#connection").classList.add("live"); } };
-events.onerror = () => {
-  if (terminalState) { showStopped(); return; }
-  $("#connection").textContent="Reconnecting"; $("#connection").classList.remove("live"); startPolling();
-};
-document.querySelectorAll("nav button").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll("nav button,.view").forEach((item)=>item.classList.remove("active")); button.classList.add("active"); $(`#${button.dataset.view}`).classList.add("active"); }));
-$("#close-drawer").addEventListener("click",()=>$("#drawer").classList.remove("open"));
-void refresh();
+function renderTasks(){const model=graphModel(),tasks=snapshot.tasks??[];uniqueOptions($("#task-status"),snapshot.graph.nodes.map((node)=>node.status),"All statuses");uniqueOptions($("#task-role"),tasks.map((task)=>task.agent_type_id),"All agent types");const q=filterValue("#task-search"),wantedStatus=$("#task-status").value,wantedRole=$("#task-role").value,wantedType=$("#task-type").value;const values=tasks.map((task)=>{const node=snapshot.graph.nodes.find((item)=>idOf(item,"id","node_id")===idOf(task,"node_id")||String(item.task_ref)===taskId(task)),id=idOf(node,"id","node_id"),run=latestRun(id);return{task,node,id,run,wave:model.levels.get(id)??0};}).filter(({task,node})=>{const hay=JSON.stringify(task).toLowerCase();return(!q||hay.includes(q))&&(wantedStatus==="all"||statusName(node?.status)===wantedStatus)&&(wantedRole==="all"||statusName(task.agent_type_id)===wantedRole)&&(wantedType==="all"||statusName(node?.node_type??"work")===wantedType);}).sort((a,b)=>a.wave-b.wave||a.id.localeCompare(b.id));
+  $("#task-count").textContent=`${values.length} visible`;$("#task-summary").replaceChildren(...summaryGroup([[tasks.length,"Task contracts"],[snapshot.graph.nodes.filter((node)=>["accepted","integrated"].includes(statusName(node.status))).length,"Accepted / integrated"],[snapshot.graph.nodes.filter((node)=>["blocked","failed","stale"].includes(statusName(node.status))).length,"Attention"],[`Wave ${Math.max(0,...values.filter((item)=>["active","running"].includes(statusName(item.node?.status))).map((item)=>item.wave))}`,"Current layer"]]));
+  const rows=[];let last=-1;for(const item of values){if(item.wave!==last){const group=element("tr",{className:"wave-row"});group.append(element("td",{text:`Wave ${item.wave} · dependency layer ${item.wave}`,attrs:{colspan:9}}));rows.push(group);last=item.wave;}const gates=element("span",{className:"gate-trio"},[gateBadge("T",gateState(item.run,"test")),gateBadge("L",gateState(item.run,"lint")),gateBadge("V",item.node?.validator_status??item.run?.validator_status??"pending")]);const cells=[cell("Task",taskId(item.task),"primary mono"),cell("Node",item.id,"mono"),cell("Goal / module",item.task.goal,"primary goal-cell"),cell("Agent type",item.task.agent_type_id),element("td",{attrs:{"data-label":"Status"}},status(item.node?.status)),cell("Scope",`${arrayValue(item.task.owned_scopes).length} owned`),element("td",{attrs:{"data-label":"Gates T · L · V"}},gates),cell("Attempt",`a${item.run?.attempt??0}`,"mono"),cell("Started / ended",short(displayTime(item.run?.started_at??item.run?.ended_at),18),"mono")];rows.push(interactiveRow(taskId(item.task),cells,(event)=>openDrawer("Task inspector",taskId(item.task),taskDrawer(item.task,item.node,item.run),event.currentTarget)));}
+  if(!rows.length)rows.push(emptyTableRow(9,"当前条件下没有匹配 Task。"));$("#task-table").replaceChildren(table(["Task","Node","Goal / module","Agent type","Status","Scope","Gates T · L · V","Attempt","Started / ended"],rows,["90px","72px",null,"130px","92px","92px","130px","72px","120px"]));}
+
+function taskDrawer(task,node,run){return[section("Overview",kv([["Task ID",taskId(task)],["Node ID",idOf(node,"id","node_id")],["Goal",task.goal],["Agent Type",task.agent_type_id],["Status",status(node?.status)],["Attempt",run?.attempt??0]])),section("Task contract",kv([["Feature Points",arrayValue(task.feature_points).map((item)=>`${item.id}: ${item.expected_behavior}`).join(" · ")||"—"],["Modules",arrayValue(task.modules).map((item)=>`${item.name}: ${arrayValue(item.paths).join(", ")}`).join(" · ")||"—"],["Authoritative Inputs",arrayValue(task.authoritative_inputs).join(" · ")||"—"],["Constraints",arrayValue(task.constraints).join(" · ")||"—"],["Completion Criteria",arrayValue(task.completion_criteria).join(" · ")||"—"],["Owned Scopes",arrayValue(task.owned_scopes).join(" · ")||"—"],["Forbidden Scopes",arrayValue(task.forbidden_scopes).join(" · ")||"—"]])),section("Inputs / Outputs",kv([["Inputs",JSON.stringify(task.inputs??[])],["Outputs",JSON.stringify(task.outputs??[])]])),section("Gates",gateCard("Test gate",task.self_validation?.test_gate,run,"test"),gateCard("Lint gate",task.self_validation?.lint_gate,run,"lint")),raw({task,node,run})];}
+
+function artifactViewModels(){return(snapshot.artifact_contracts??[]).map((contract)=>{const id=artifactContractId(contract),entries=registryForContract(id);return{contract,id,entries:entries.length?entries:[{artifact_contract_id:id,status:"planned",artifact_version:null}],payloads:(snapshot.artifacts??[]).filter((item)=>String(item.artifact_contract_id??"")===id)};});}
+function renderArtifacts(){const models=artifactViewModels();uniqueOptions($("#artifact-status"),models.flatMap((item)=>item.entries.map((entry)=>entry.status)),"All statuses");const q=filterValue("#artifact-search"),wantedStatus=$("#artifact-status").value,wantedPurpose=$("#artifact-purpose").value;const filtered=models.filter(({contract,id,entries})=>(!q||JSON.stringify({contract,entries}).toLowerCase().includes(q))&&(wantedStatus==="all"||entries.some((entry)=>statusName(entry.status)===wantedStatus))&&(wantedPurpose==="all"||statusName(contract.purpose)===wantedPurpose));$("#artifact-count").textContent=`${filtered.length} contracts`;$("#artifact-summary").replaceChildren(...summaryGroup([[models.length,"Planned contracts"],[(snapshot.artifact_registry??[]).length,"Immutable versions"],[snapshot.counts.generated_artifacts,"Accepted / integrated"],[(snapshot.artifact_registry??[]).filter((item)=>item.status==="stale").length,"Stale versions"]]));const target=$("#artifact-grid");target.replaceChildren();for(const model of filtered){const article=element("article",{className:"contract"}),head=element("header",{className:"contract-head"}),title=element("div",{className:"contract-title"},[element("strong",{text:model.id}),element("span",{className:"contract-meta",text:`${model.contract.artifact_type} · ${pretty(model.contract.purpose)}`})]);head.append(title,element("div",{className:"relation mono",text:`${model.contract.producer?.node_id??"?"} → ${arrayValue(model.contract.consumers).map((item)=>item.node_id).join(", ")||"terminal"}`}));const list=element("div",{className:"version-list"});model.entries.forEach((entry,index)=>{const payload=payloadForArtifact(entry,model.id),row=element("div",{className:`version${index===0?" latest":""}`,attrs:{tabindex:"0",role:"button","aria-label":`Inspect ${model.id} ${entry.artifact_version?`version ${entry.artifact_version}`:"planned contract"}`},dataset:{artifactId:actualArtifactId(entry)}});row.append(element("span",{className:"mono",text:entry.artifact_version?`v${entry.artifact_version}`:"Plan"},index===0&&entry.artifact_version?[element("span",{className:"latest-label",text:"LATEST"})]:[]),status(entry.status),element("span",{className:"mono",text:actualArtifactId(entry)||"Not generated"}),element("span",{className:"mono muted",text:entry.uri??model.contract.delivery?.path??"—"}),element("span",{className:"digest",text:entry.digest??"—",attrs:{title:entry.digest??""}}),element("span",{className:"mono",text:displayTime(entry.accepted_at??entry.created_at)}));const open=(event)=>openDrawer("Artifact inspector",actualArtifactId(entry)||model.id,artifactDrawer(model.contract,entry,payload,model.entries),event.currentTarget);row.addEventListener("click",open);row.addEventListener("keydown",(event)=>{if(["Enter"," "].includes(event.key)){event.preventDefault();open(event);}});list.append(row);});article.append(head,list);target.append(article);}if(!filtered.length)target.append(element("div",{className:"contract empty-row",text:"当前条件下没有匹配 Artifact Contract。"}));}
+
+function artifactDrawer(contract,entry,payload,history){return[section("Lifecycle",kv([["Artifact Contract",artifactContractId(contract)],["Actual Artifact",actualArtifactId(entry)||"Not generated"],["Artifact Type",contract.artifact_type],["Purpose",pretty(contract.purpose)],["Version",entry.artifact_version?`v${entry.artifact_version}`:"Planned"],["Status",status(entry.status)]])),section("Planned contract",kv([["Producer",contract.producer?`${contract.producer.node_id} / ${contract.producer.port}`:"—"],["Consumers",arrayValue(contract.consumers).map((item)=>`${item.node_id} / ${item.port}`).join(" · ")||"Terminal output"],["Format",contract.delivery?.format??"—"],["Path",contract.delivery?.path??"—"],["Acceptance Checks",arrayValue(contract.acceptance_checks).join(" · ")||"—"]])),section("Registry entry",kv([["Producer Run",entry.producer?`${entry.producer.node_id} · ${entry.producer.node_run_id} · a${entry.producer.attempt}`:"—"],["Agent Instance",entry.producer?.agent_instance_id??"—"],["URI",entry.uri??payload?.uri??"—"],["Files",arrayValue(entry.files??payload?.files).map((item)=>typeof item==="string"?item:item.path).join(" · ")||"—"],["Digest",entry.digest??"—"],["Created At",displayTime(entry.created_at)],["Accepted At",displayTime(entry.accepted_at)],["Evidence",arrayValue(entry.validation_evidence_refs).join(" · ")||"—"]])),section("Version history",...history.map((item)=>kv([[`v${item.artifact_version??"plan"}`,`${actualArtifactId(item)} · ${pretty(item.status)} · ${short(item.digest,18)}`]]))),payload?section("Payload metadata",raw(payload)):section("Payload metadata",element("p",{className:"muted small",text:"No structured payload metadata recorded."})),raw({contract,entry,payload})];}
+
+function renderRuns(){const runs=snapshot.node_runs??[];uniqueOptions($("#run-status"),runs.map((run)=>run.status),"All statuses");uniqueOptions($("#run-role"),runs.map((run)=>run.agent_type_id),"All agent types");const q=filterValue("#run-search"),wantedStatus=$("#run-status").value,wantedRole=$("#run-role").value;const filtered=runs.filter((run)=>(!q||JSON.stringify(run).toLowerCase().includes(q))&&(wantedStatus==="all"||statusName(run.status)===wantedStatus)&&(wantedRole==="all"||statusName(run.agent_type_id)===wantedRole)).sort((a,b)=>Number(["active","running"].includes(statusName(b.status)))-Number(["active","running"].includes(statusName(a.status)))||runNodeId(a).localeCompare(runNodeId(b))||(b.attempt??0)-(a.attempt??0));$("#run-count").textContent=`${filtered.length} runs`;renderCapacity();const rows=filtered.map((run)=>{const gates=element("span",{className:"gate-trio"},[gateBadge("T",gateState(run,"test")),gateBadge("L",gateState(run,"lint")),gateBadge("V",run.validator_status??"pending")]);return interactiveRow(run.node_run_id??`${runNodeId(run)}-a${run.attempt}`,[cell("Agent Instance",run.agent_instance_id,"primary mono"),cell("Agent Type",run.agent_type_id),cell("Node Run",run.node_run_id,"mono"),cell("Node",runNodeId(run),"mono"),cell("Attempt",`a${run.attempt??0}`,"mono"),element("td",{attrs:{"data-label":"Status"}},status(run.status)),cell("Input → Output",`${arrayValue(run.input_artifacts).length} → ${arrayValue(run.output_artifacts).length}`),element("td",{attrs:{"data-label":"Gates"}},gates),cell("Time / Failure",run.failure?.message??short(displayTime(run.started_at),18),"mono")],(event)=>openDrawer("Node run inspector",run.node_run_id??runNodeId(run),runDrawer(run),event.currentTarget));});if(!rows.length)rows.push(emptyTableRow(9,"当前条件下没有匹配 Node Run。"));$("#run-table").replaceChildren(table(["Agent Instance","Agent Type","Node Run","Node","Attempt","Status","Input → Output","Gates","Time / Failure"],rows,["140px","135px","155px","80px","70px","90px",null,"130px","150px"]));}
+function renderCapacity(){const effective=snapshot.capacity.effective,hard=snapshot.capacity.hard_limit??15,active=snapshot.counts.agent_instances,stack=element("div",{className:"capacity-stack",attrs:{"aria-label":effective===null?"Effective capacity unknown":`${active} active agents of ${effective} effective capacity`}});for(let i=0;i<hard;i++)stack.append(element("i",{className:i<active?"on":""}));const cap=element("div",{className:"capacity-card"},[element("div",{className:"capacity-head"},[element("div",{},[element("div",{className:"context-label",text:"Effective capacity"}),element("div",{className:"capacity-number",text:effective===null?"Unknown":`${active} / ${effective}`} )]),status(effective===null?"pending":active>=effective?"active":"ready")]),stack,element("div",{className:"capacity-meta"},[element("span",{text:`Runtime ${Number.isFinite(snapshot.capacity.platform)?snapshot.capacity.platform:"Unknown"}`}),element("span",{text:`Permission ${Number.isFinite(snapshot.capacity.permission)?snapshot.capacity.permission:"Unknown"}`}),element("span",{text:`Hard ${hard}`})])]);const coordinator=snapshot.node_runs_raw?.coordinator_agent_instance_id??snapshot.run?.coordinator_agent_instance_id??snapshot.node_runs.find((run)=>String(run.agent_type_id).toLowerCase().includes("coordinator"))?.agent_instance_id??"Coordinator counted in capacity";const coord=element("div",{className:"coordinator-card"},[element("div",{},[element("div",{className:"context-label",text:"Coordinator"}),element("h3",{text:coordinator}),element("div",{className:"small muted",text:"Top-level planner, scheduler, and single control-plane writer."})]),status("active")]);$("#capacity-panel").replaceChildren(cap,coord);}
+function runDrawer(run){const attempts=runsForNode(runNodeId(run));return[section("Overview",kv([["Agent Type",run.agent_type_id],["Agent Instance",run.agent_instance_id],["Node Run ID",run.node_run_id],["Node ID",runNodeId(run)],["Attempt",run.attempt],["Status",status(run.status)],["Started / Ended",`${displayTime(run.started_at)} → ${displayTime(run.ended_at)}`]])),section("Capacity",kv([["Occupies Capacity",["active","running"].includes(statusName(run.status))?"Yes":"No"],["Effective / Hard",`${snapshot.capacity.effective??"Unknown"} / ${snapshot.capacity.hard_limit??15}`],["Runtime / Permission",`${Number.isFinite(snapshot.capacity.platform)?snapshot.capacity.platform:"Unknown"} / ${Number.isFinite(snapshot.capacity.permission)?snapshot.capacity.permission:"Unknown"}`]])),section("Inputs / Outputs",kv([["Input Artifacts",JSON.stringify(run.input_artifacts??[])],["Output Artifacts",arrayValue(run.output_artifacts).join(" · ")||"—"]])),section("Gates",gateCard("Test gate",null,run,"test"),gateCard("Lint gate",null,run,"lint"),kv([["Validator",pretty(run.validator_status??"pending")]])),section("Attempt history",...attempts.map((item)=>kv([[`Attempt a${item.attempt}`,`${item.node_run_id} · ${pretty(item.status)} · ${displayTime(item.started_at)}`]]))),run.failure?section("Failure",kv([["Type",run.failure.type],["Step",run.failure.step],["Message",run.failure.message??run.failure.error],["Last Successful State",run.failure.last_successful_state]])):null,raw(run)].filter(Boolean);}
+
+function renderEvents(){const events=[...(snapshot.events??[])].slice(-200).reverse();uniqueOptions($("#event-type"),events.map((event)=>event.type??event.event_type),"All event types");const q=filterValue("#event-search"),wanted=$("#event-type").value;const filtered=events.filter((event)=>(!q||JSON.stringify(event).toLowerCase().includes(q))&&(wanted==="all"||statusName(event.type??event.event_type)===wanted));$("#event-count").textContent=`${filtered.length} events`;const target=$("#event-list");target.replaceChildren();for(const event of filtered){const type=event.type??event.event_type??"event",object=event.node_id??event.task_id??event.artifact_id??event.agent_instance_id??event.plan_id??"—",transition=event.from_status||event.to_status?`${event.from_status??"—"} → ${event.to_status??"—"}`:pretty(event.status??type),message=event.message??event.detail??event.reason??JSON.stringify(event);const row=element("article",{className:"event",attrs:{tabindex:"0",role:"button","aria-label":`${pretty(type)} event for ${object}: ${message}`}});row.append(element("div",{className:"event-time",text:displayTime(event.timestamp??event.created_at??event.at)}),element("div",{className:"event-rev",text:`r${event.revision??"—"}`}),element("div",{},status(type)),element("div",{className:"mono small",text:`${object} · ${transition}`}),element("div",{className:"event-message",text:message}));const open=()=>openEvent(event);row.addEventListener("click",open);row.addEventListener("keydown",(e)=>{if(["Enter"," "].includes(e.key)){e.preventDefault();open();}});target.append(row);}if(!filtered.length)target.append(element("div",{className:"empty-row",text:"当前条件下没有匹配 Event。"}));}
+function openEvent(event){if(event.node_id){activateView("graph");selectEntity("node",event.node_id);return;}if(event.artifact_id||event.artifact_contract_id){activateView("artifacts");$("#artifact-search").value=event.artifact_contract_id??event.artifact_id;renderArtifacts();return;}if(statusName(event.type??event.event_type).includes("connection")){activateView("graph");selected=null;renderInspector();return;}showToast("关联对象不在当前 Revision");}
+
+function activateView(name){activeView=name;$$('[data-view]').forEach((button)=>button.toggleAttribute("aria-current",button.dataset.view===name));$$('.view').forEach((view)=>view.classList.toggle("active",view.id===`view-${name}`));if(name==="graph")renderGraph();}
+
+function openDrawer(kind,title,children,trigger){drawerTrigger=trigger;$("#drawer-kind").textContent=kind;$("#drawer-title").textContent=title;$("#drawer-body").replaceChildren(...children);$("#detail-drawer").classList.add("open");$("#detail-drawer").setAttribute("aria-hidden","false");$("#scrim").hidden=false;requestAnimationFrame(()=>$("#scrim").classList.add("open"));$("#app").inert=true;$("#close-drawer").focus();}
+function closeDrawer(){const drawer=$("#detail-drawer");if(!drawer.classList.contains("open"))return;drawer.classList.remove("open");drawer.setAttribute("aria-hidden","true");$("#scrim").classList.remove("open");$("#app").inert=false;setTimeout(()=>{$("#scrim").hidden=true;drawerTrigger?.focus?.();},220);}
+function trapDrawerFocus(event){if(event.key!=="Tab"||!$("#detail-drawer").classList.contains("open"))return;const controls=$$('button,[href],input,select,summary,[tabindex]:not([tabindex="-1"])',$("#detail-drawer")).filter((item)=>!item.disabled);if(!controls.length)return;const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}
+
+function renderAll(){if(!snapshot)return;renderGlobal();renderGraph();renderTasks();renderArtifacts();renderRuns();renderEvents();}
+function renderLoading(){const nodes=$("#graph-nodes");nodes.replaceChildren(...[0,1,2].map(()=>element("div",{className:"skeleton skeleton-node"})));$("#summary").replaceChildren(...Array.from({length:7},()=>summaryItem("Loading","—")));}
+
+async function refresh(){try{const response=await fetch("/api/snapshot",{cache:"no-store"});if(!response.ok)throw new Error((await response.json()).error??`HTTP ${response.status}`);const value=await response.json();snapshot=value;renderAll();if(!terminalState&&connectionState==="connecting")setConnection("live","Live");return value;}catch(error){if(!snapshot){renderLoading();$("#banner").hidden=false;$("#banner").replaceChildren(element("strong",{text:"Waiting"}),element("span",{text:error.message}));}else{$("#banner").hidden=false;$("#banner").replaceChildren(element("strong",{text:"Degraded"}),element("span",{text:`${error.message}. Showing last valid revision r${snapshot.revision}.`}));}if(!terminalState)setConnection("waiting","Waiting");return null;}}
+function startPolling(){if(!polling&&!terminalState){setConnection("polling","Polling · degraded");polling=setInterval(()=>void refresh(),2000);}}
+function stopPolling(){if(polling)clearInterval(polling);polling=undefined;}
+function showStopped(event){let detail={};try{detail=event?.data?JSON.parse(event.data):{};}catch{}terminalState={...(terminalState??{}),...detail,stopped:true};stopPolling();eventSource?.close();setConnection("stopped",`${terminalLabel(terminalState.phase)} · Server stopped`);renderBanner();}
+async function synchronizeTerminal(event){if(terminalSync)return terminalSync;const terminal=JSON.parse(event.data);terminalState={...terminal,stopped:false};stopPolling();setConnection("finalizing","Finalizing · syncing final snapshot");terminalSync=(async()=>{const value=await refresh();if(!value||value.revision!==terminal.revision||value.phase!==terminal.phase)throw new Error("Final snapshot revision does not match terminal event");setConnection("finalizing",`${terminalLabel(terminal.phase)} · stopping server`);const response=await fetch("/api/finalization-ack",{method:"POST",headers:{"x-dashboard-client-id":clientId,"x-dashboard-revision":String(terminal.revision)}});if(!response.ok)throw new Error((await response.json()).error??`Finalization ACK failed: HTTP ${response.status}`);})().catch((error)=>{$("#banner").hidden=false;$("#banner").replaceChildren(element("strong",{text:"Finalizing"}),element("span",{text:error.message}));setConnection("finalizing","Finalizing · waiting for shutdown");});return terminalSync;}
+function connectEvents(){eventSource=new EventSource(`/api/events?client_id=${encodeURIComponent(clientId)}`);eventSource.addEventListener("revision",()=>{stopPolling();if(!terminalState)setConnection("live","Live");void refresh();});eventSource.addEventListener("degraded",()=>{if(!terminalState)setConnection("degraded","Degraded");void refresh();});eventSource.addEventListener("terminal",(event)=>void synchronizeTerminal(event));eventSource.addEventListener("shutdown",showStopped);eventSource.onopen=()=>{stopPolling();if(!terminalState)setConnection("live","Live");};eventSource.onerror=()=>{if(terminalState){showStopped();return;}setConnection("reconnecting","Reconnecting");startPolling();};}
+
+function initializeInteractions(){$$('[data-view]').forEach((button)=>button.addEventListener("click",()=>activateView(button.dataset.view)));$("#run-id").addEventListener("click",()=>copyText(runId(),"Run ID"));$("#connection").addEventListener("click",()=>{activateView("graph");selected=null;renderInspector();showToast(`${pretty(connectionState)} · revision r${snapshot?.revision??"—"}`);});$("#zoom-in").addEventListener("click",()=>setZoom(Math.min(1.25,zoom+.1)));$("#zoom-out").addEventListener("click",()=>setZoom(Math.max(.55,zoom-.1)));$("#fit-view").addEventListener("click",fitView);$("#recenter").addEventListener("click",recenter);$("#mini-map").addEventListener("click",recenter);$("#edge-select").addEventListener("change",(event)=>{if(event.target.value)selectEntity("edge",event.target.value);});$("#clear-selection").addEventListener("click",()=>{selected=null;$("#graph-inspector").classList.remove("open");renderGraph();});
+  for(const [id,render,eventName] of [["#task-search",renderTasks,"input"],["#task-status",renderTasks,"change"],["#task-role",renderTasks,"change"],["#task-type",renderTasks,"change"],["#artifact-search",renderArtifacts,"input"],["#artifact-status",renderArtifacts,"change"],["#artifact-purpose",renderArtifacts,"change"],["#run-search",renderRuns,"input"],["#run-status",renderRuns,"change"],["#run-role",renderRuns,"change"],["#event-search",renderEvents,"input"],["#event-type",renderEvents,"change"]])$(id).addEventListener(eventName,render);
+  $("#close-drawer").addEventListener("click",closeDrawer);$("#scrim").addEventListener("click",closeDrawer);document.addEventListener("keydown",(event)=>{trapDrawerFocus(event);if(event.key==="Escape"){if($("#detail-drawer").classList.contains("open"))closeDrawer();else if(selected){selected=null;$("#graph-inspector").classList.remove("open");renderGraph();}}});initializePan();}
+function setZoom(value){zoom=Math.round(value*100)/100;$("#zoom-value").textContent=`${Math.round(zoom*100)}%`;if(snapshot)renderGraph();}
+function fitView(){if(!snapshot?.graph?.nodes?.length)return;const model=graphModel(),scroll=$("#graph-scroll");setZoom(Math.max(.55,Math.min(1,(scroll.clientWidth-20)/model.width)));scroll.scrollLeft=0;scroll.scrollTop=0;}
+function recenter(){const model=graphModel(),scroll=$("#graph-scroll");scroll.scrollLeft=Math.max(0,(model.width*zoom-scroll.clientWidth)/2);scroll.scrollTop=Math.max(0,(model.height*zoom-scroll.clientHeight)/2);}
+function initializePan(){const area=$("#graph-scroll");let pan=null;area.addEventListener("pointerdown",(event)=>{if(event.button!==0||event.target.closest("button,select,input,a"))return;pan={x:event.clientX,y:event.clientY,left:area.scrollLeft,top:area.scrollTop,id:event.pointerId};area.setPointerCapture(event.pointerId);area.classList.add("panning");});area.addEventListener("pointermove",(event)=>{if(!pan||event.pointerId!==pan.id)return;area.scrollLeft=pan.left-(event.clientX-pan.x);area.scrollTop=pan.top-(event.clientY-pan.y);});const end=(event)=>{if(!pan||event.pointerId!==pan.id)return;pan=null;area.classList.remove("panning");};area.addEventListener("pointerup",end);area.addEventListener("pointercancel",end);area.addEventListener("keydown",(event)=>{const amount=event.shiftKey?160:40;if(event.key==="ArrowLeft")area.scrollLeft-=amount;else if(event.key==="ArrowRight")area.scrollLeft+=amount;else if(event.key==="ArrowUp")area.scrollTop-=amount;else if(event.key==="ArrowDown")area.scrollTop+=amount;else return;event.preventDefault();});}
+
+initializeInteractions();renderLoading();void refresh().then(connectEvents);

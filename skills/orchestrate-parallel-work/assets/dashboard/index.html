@@ -3,27 +3,96 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Orchestration Graph</title>
+  <meta name="color-scheme" content="dark">
+  <title>Orchestrate Parallel Work — Runtime Dashboard</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <header>
-    <div><p class="eyebrow">GRAPH CONTROL PLANE</p><h1>Orchestration run</h1></div>
-    <div id="connection" class="connection">Connecting…</div>
-  </header>
-  <section id="summary" class="summary" aria-label="Run summary"></section>
-  <nav aria-label="Dashboard views">
-    <button class="active" data-view="graph">Graph</button><button data-view="tasks">Tasks</button><button data-view="artifacts">Artifacts</button><button data-view="runs">Runs</button><button data-view="events">Events</button>
-  </nav>
-  <main>
-    <section id="graph" class="view active"><div class="graph-shell"><svg id="dag" role="img" aria-label="Task dependency graph"></svg></div></section>
-    <section id="tasks" class="view"></section>
-    <section id="artifacts" class="view"></section>
-    <section id="runs" class="view"></section>
-    <section id="events" class="view"></section>
-  </main>
-  <aside id="drawer" aria-live="polite"><button id="close-drawer" aria-label="Close details">×</button><h2 id="drawer-title">Details</h2><pre id="drawer-content"></pre></aside>
-  <div id="notice" role="status"></div>
+  <div id="app" class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><div class="brand-name">Orchestrate<br>Parallel Work</div><div class="brand-sub">Graph Runtime</div></div>
+      </div>
+      <nav id="primary-nav" class="nav" aria-label="Primary views">
+        <button class="nav-btn" data-view="graph" aria-current="page"><span class="nav-label"><span class="nav-icon">⌘</span>Graph</span><span class="nav-count" data-count="nodes">—</span></button>
+        <button class="nav-btn" data-view="tasks"><span class="nav-label"><span class="nav-icon">≡</span>Tasks</span><span class="nav-count" data-count="tasks">—</span></button>
+        <button class="nav-btn" data-view="artifacts"><span class="nav-label"><span class="nav-icon">◇</span>Artifacts</span><span class="nav-count" data-count="artifacts">—</span></button>
+        <button class="nav-btn" data-view="runs"><span class="nav-label"><span class="nav-icon">◎</span>Runs / Agents</span><span class="nav-count" data-count="runs">—</span></button>
+        <button class="nav-btn" data-view="events"><span class="nav-label"><span class="nav-icon">↳</span>Events</span><span class="nav-count" data-count="events">—</span></button>
+      </nav>
+      <div class="sidebar-foot"><div class="readonly"><strong>Read-only console</strong>Plan approval and execution control remain in the Agent conversation.</div></div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div class="run-context">
+          <button id="run-id" class="run-id mono" aria-label="Copy run ID">Waiting for run… <span aria-hidden="true">⧉</span></button>
+          <div class="context-pair"><div class="context-label">Plan</div><div id="plan-value" class="context-value">—</div></div>
+          <div class="context-pair context-updated"><div class="context-label">Revision</div><div id="revision-value" class="context-value">—</div></div>
+          <div class="context-pair context-updated"><div class="context-label">Updated</div><div id="updated-value" class="context-value">—</div></div>
+        </div>
+        <div class="top-status">
+          <span id="approval-pill" class="pill neutral">Unknown</span>
+          <span id="phase-pill" class="pill neutral">Waiting</span>
+          <button id="connection" class="pill connecting" aria-label="Connection details" role="status" aria-live="polite">Connecting</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+        <section id="view-graph" class="view active" aria-labelledby="graph-heading">
+          <h1 id="graph-heading" class="sr-only">Execution graph</h1>
+          <div id="summary" class="summary-strip" aria-label="Run summary"></div>
+          <div class="graph-shell">
+            <div class="graph-area">
+              <div class="graph-toolbar">
+                <div id="graph-caption" class="toolbar-label"><strong>Execution graph</strong> · waiting for plan</div>
+                <button id="zoom-out" class="toolbar-btn" aria-label="Zoom out">−</button>
+                <span id="zoom-value" class="zoom-value mono">100%</span>
+                <button id="zoom-in" class="toolbar-btn" aria-label="Zoom in">+</button>
+                <button id="fit-view" class="toolbar-btn">Fit to view</button>
+                <button id="recenter" class="toolbar-btn">Recenter</button>
+                <select id="edge-select" class="edge-select" aria-label="Inspect an edge"><option value="">Inspect edge…</option></select>
+              </div>
+              <div id="graph-scroll" class="graph-scroll" tabindex="0" aria-label="Execution graph canvas. Use arrow keys to pan.">
+                <div id="graph-stage" class="graph-stage"><div id="graph-canvas" class="graph-canvas"><svg id="dag" class="edges" aria-hidden="true"></svg><div id="edge-labels"></div><div id="graph-nodes"></div><button id="mini-map" class="mini-map" aria-label="Recenter graph"></button></div></div>
+                <div id="graph-empty" class="empty-state" hidden><strong>Graph 计划尚未生成</strong><span>等待 graph-plan.json 落地。</span></div>
+              </div>
+            </div>
+            <aside id="graph-inspector" class="inspector" aria-label="Graph details">
+              <div class="inspector-head"><div><div id="inspector-kind" class="inspector-kind">Graph inspector</div><h2 id="inspector-title">Select a Node or Edge</h2></div><button id="clear-selection" class="icon-btn" aria-label="Clear graph selection">×</button></div>
+              <div id="inspector-body" class="inspector-body"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="view-tasks" class="view" aria-labelledby="tasks-heading">
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="tasks-heading">Tasks</h1><p>Contract scope, gate progress, and validation readiness by dependency wave.</p></div><div class="filters"><input id="task-search" class="search" placeholder="Search task, node, goal, module…" aria-label="Search tasks"><select id="task-status" class="filter-select" aria-label="Filter tasks by status"><option value="all">All statuses</option></select><select id="task-role" class="filter-select" aria-label="Filter tasks by agent type"><option value="all">All agent types</option></select><select id="task-type" class="filter-select" aria-label="Filter tasks by node type"><option value="all">All node types</option><option value="work">Work</option><option value="integration">Integration</option><option value="validation">Validation</option></select></div></header><div class="page-content"><div id="task-summary" class="subsummary"></div><div class="section-bar"><h2>Grouped by dependency wave</h2><span id="task-count" class="small muted">0 visible</span></div><div id="task-table" class="table-wrap"></div></div></div>
+        </section>
+
+        <section id="view-artifacts" class="view" aria-labelledby="artifacts-heading">
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="artifacts-heading">Artifacts</h1><p>Planned contracts, immutable registry versions, and payload metadata.</p></div><div class="filters"><input id="artifact-search" class="search" placeholder="Search contract, artifact, path…" aria-label="Search artifacts"><select id="artifact-status" class="filter-select" aria-label="Filter artifacts by status"><option value="all">All statuses</option></select><select id="artifact-purpose" class="filter-select" aria-label="Filter artifacts by purpose"><option value="all">All purposes</option><option value="intermediate">Intermediate</option><option value="delivery">Delivery</option><option value="evidence">Evidence</option></select></div></header><div class="page-content"><div id="artifact-summary" class="subsummary"></div><div class="section-bar"><h2>Contract → immutable versions</h2><span id="artifact-count" class="small muted">0 contracts</span></div><div id="artifact-grid" class="artifact-grid"></div></div></div>
+        </section>
+
+        <section id="view-runs" class="view" aria-labelledby="runs-heading">
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="runs-heading">Runs / Agents</h1><p>Capacity occupancy, Agent Instances, Node Runs, and immutable attempts.</p></div><div class="filters"><input id="run-search" class="search" placeholder="Search agent, node run, artifact…" aria-label="Search runs"><select id="run-status" class="filter-select" aria-label="Filter runs by status"><option value="all">All statuses</option></select><select id="run-role" class="filter-select" aria-label="Filter runs by agent type"><option value="all">All agent types</option></select></div></header><div class="page-content"><div id="capacity-panel" class="capacity-panel"></div><div class="section-bar"><h2>Node run registry</h2><span id="run-count" class="small muted">0 runs</span></div><div id="run-table" class="table-wrap"></div></div></div>
+        </section>
+
+        <section id="view-events" class="view" aria-labelledby="events-heading">
+          <div class="page"><header class="page-head"><div class="page-title"><h1 id="events-heading">Events</h1><p>Recent append-only factual transitions. Latest first, maximum 200.</p></div><div class="filters"><input id="event-search" class="search" placeholder="Search node, artifact, agent, message…" aria-label="Search events"><select id="event-type" class="filter-select" aria-label="Filter events by type"><option value="all">All event types</option></select></div></header><div class="page-content"><div class="section-bar"><h2>Factual event stream</h2><span id="event-count" class="small muted">0 events</span></div><div id="event-list" class="event-list"></div></div></div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <div id="scrim" class="scrim" hidden></div>
+  <aside id="detail-drawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true">
+    <div class="drawer-head"><div><div id="drawer-kind" class="inspector-kind">Details</div><h2 id="drawer-title">Details</h2></div><button id="close-drawer" class="icon-btn" aria-label="Close details">×</button></div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/assets/app.js"></script>
 </body>
 </html>

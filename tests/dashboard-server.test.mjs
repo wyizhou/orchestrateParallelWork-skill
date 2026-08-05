@@ -27,9 +27,9 @@ test("server binds only IPv4 loopback and serves read-only APIs and assets",asyn
   const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
   const dashboard=await createDashboardServer({runDir:directory,port:0,interval:60_000}); t.after(()=>dashboard.close());
   assert.equal(dashboard.server.address().address,"127.0.0.1");
-  const page=await fetch(`${dashboard.url}/`); assert.equal(page.status,200); assert.match(await page.text(),/Orchestration Graph/);
+  const page=await fetch(`${dashboard.url}/`); assert.equal(page.status,200); assert.match(await page.text(),/Orchestrate Parallel Work — Runtime Dashboard/);
   const css=await fetch(`${dashboard.url}/assets/styles.css`); assert.match(await css.text(),/prefers-reduced-motion/);
-  const app=await fetch(`${dashboard.url}/assets/app.js`); assert.match(await app.text(),/createElementNS/);
+  const app=await fetch(`${dashboard.url}/assets/app.js`); const appSource=await app.text(); assert.match(appSource,/createElementNS/); assert.match(appSource,/finalization-ack/); assert.match(appSource,/renderRuns/);
   const snapshot=await fetch(`${dashboard.url}/api/snapshot`); assert.equal(snapshot.status,200); assert.equal((await snapshot.json()).revision,7);
   const task=await fetch(`${dashboard.url}/api/tasks/task-1`); assert.equal(task.status,200); assert.equal((await task.json()).task.task_id,"task-1");
   assert.equal((await fetch(`${dashboard.url}/api/artifacts/artifact-1`)).status,200);
@@ -57,6 +57,22 @@ test("SSE emits the current revision and a later landed revision",async(t)=>{
   const deadline=Date.now()+2000;
   while(!text.includes("id: 8")&&Date.now()<deadline) text+=decoder.decode((await reader.read()).value,{stream:true});
   assert.match(text,/event: revision/); assert.match(text,/id: 8/); controller.abort();
+});
+
+test("SSE reports a degraded update while retaining the last valid revision",async(t)=>{
+  const directory=await runFixture(); t.after(()=>rm(directory,{recursive:true,force:true}));
+  const dashboard=await createDashboardServer({runDir:directory,port:0,interval:20}); t.after(()=>dashboard.close());
+  const controller=new AbortController(); t.after(()=>controller.abort());
+  const response=await fetch(`${dashboard.url}/api/events?client_id=degraded-browser`,{signal:controller.signal});
+  const reader=response.body.getReader(); const decoder=new TextDecoder(); let text="";
+  while(!text.includes("id: 7")) text+=decoder.decode((await reader.read()).value,{stream:true});
+  await writeFile(path.join(directory,"state.json"),"{");
+  const deadline=Date.now()+2_000;
+  while(!text.includes("event: degraded")&&Date.now()<deadline) text+=decoder.decode((await reader.read()).value,{stream:true});
+  assert.match(text,/event: degraded/);
+  assert.match(text,/"revision":7/);
+  assert.equal(dashboard.store.snapshot.revision,7);
+  controller.abort();
 });
 
 test("terminal revision is rendered, acknowledged, and followed by graceful shutdown",async(t)=>{

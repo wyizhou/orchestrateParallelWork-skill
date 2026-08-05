@@ -12,7 +12,7 @@
 
 - **DAG 原生表达三种执行方式**：依赖链形成串行，互不依赖的 Ready Nodes 形成并行，fan-out/fan-in 形成串并行。
 - **批准门不可绕过**：初始“请完成”不等于批准尚未生成的 Graph；任何实质契约变化都会使旧批准失效。
-- **实时 Graph Dashboard**：零 npm 依赖的 Node.js 服务固定监听 [`http://127.0.0.1:8088`](http://127.0.0.1:8088)，展示 Graph、Tasks、Artifacts、Runs 和 Events；端口可显式覆盖。
+- **实时 Graph Dashboard**：零 npm 运行依赖的 Node.js 服务固定监听 [`http://127.0.0.1:8088`](http://127.0.0.1:8088)，提供响应式 Graph、Tasks、Artifacts、Runs 和 Events 五个视图，以及 Node、Edge、Task、Artifact 和 Run 的结构化检查器；端口可显式覆盖。
 - **最终状态可靠交付**：运行结束时先发布最终 Revision，等待浏览器渲染确认并以5秒超时兜底，然后自动关闭本地 HTTP 服务；已打开页面保留最终 Graph，不会持续重连。
 - **动态容量而非盲目启动**：`effective_capacity = min(15, 平台容量, 权限容量)`，并把 Coordinator、Workers 和 Validators 全部计入。
 - **按能力跨平台适配**：通用核心不绑定某个 Agent API；Codex 和 Claude Code 由独立适配层映射指令、上下文、委派、权限和 worktree 机制。

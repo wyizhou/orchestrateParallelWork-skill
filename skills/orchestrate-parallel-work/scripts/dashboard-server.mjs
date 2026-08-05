@@ -97,6 +97,9 @@ export async function createDashboardServer({ runDir, port = DEFAULT_PORT, inter
     broadcast(snapshot);
     beginFinalization(snapshot);
   });
+  store.on("degraded", (error) => {
+    for (const response of clients.keys()) sendEvent(response, { event: "degraded", data: { error, revision: store.snapshot?.revision ?? null } });
+  });
   const server = http.createServer(async (request, response) => {
     try {
       const method = request.method ?? "GET";

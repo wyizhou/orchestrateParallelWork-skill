@@ -18,7 +18,7 @@ The Dashboard process is control-plane infrastructure, not an Agent, and does no
 
 The Coordinator is the single writer for Graph state. Write each JSON file through same-directory temporary output and atomic rename, append factual events to `events.ndjson`, and update `state.json` last with a monotonically increasing revision.
 
-The server exposes a complete snapshot plus Server-Sent Events revision notifications. The browser refetches the snapshot after an event and uses short polling only while SSE is disconnected. A transient partial update must preserve the last good snapshot and display a degraded warning rather than inventing state or stopping execution.
+The server exposes a complete snapshot plus Server-Sent Events revision and degradation notifications. The browser refetches the snapshot after an event and uses short polling only while SSE is disconnected. A transient partial update must preserve the last good snapshot and display a degraded warning rather than inventing state or stopping execution.
 
 ## Publish the final snapshot before shutdown
 
@@ -32,7 +32,7 @@ Only inspect control-plane files within the selected run directory. Display exte
 
 ## Interpret the UI
 
-The home page is a dark Graph view with summary counts, capacity, approval, phase, waves, Tasks, Artifacts, runs, and recent events. Selecting a Node shows its Task, Agent assignment, inputs/outputs, attempts, test/lint evidence, and Validator status. Selecting an Edge shows its Artifact Contract, versions, producer, consumers, and delivery state.
+The responsive dark console provides dedicated Graph, Tasks, Artifacts, Runs / Agents, and Events views. The Graph view shows summary counts, capacity, approval, phase, and topological waves. Selecting a Node shows its Task, Agent assignment, inputs/outputs, attempts, test/lint evidence, and Validator status. Selecting an Edge shows its Artifact Contract, versions, producer, consumers, and delivery state. Task, Artifact, and Run rows open independent structured inspectors; Events remain a factual, newest-first stream.
 
 Node state colors distinguish planned/blocked/ready/active/submitted/accepted/integrated/failed/stale/skipped. Animate only active Nodes and Edges that are producing or flowing accepted Artifacts into an active consumer. Respect reduced-motion browser preferences.
 

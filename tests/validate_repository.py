@@ -239,7 +239,7 @@ def main() -> int:
     require(validation, ("test gate", "lint gate", "fact-only", "Expected fact", "Observed fact"), "validation reference", errors)
     require(graph_core, ("HARD_AGENT_LIMIT = 15", "computePlanHash", "validateBundle", "validateValidatorBrief", "readyNodeIds"), "graph-core.mjs", errors)
     require(dashboard_server, ('const HOST = "127.0.0.1"', "const DEFAULT_PORT = 8088", "GET", "HEAD", "text/event-stream"), "dashboard-server.mjs", errors)
-    require(dashboard_css, ("prefers-reduced-motion", "stroke-dasharray", "stroke-dashoffset", "@keyframes flow", "@keyframes pulse"), "Dashboard CSS", errors)
+    require(dashboard_css, ("prefers-reduced-motion", "stroke-dasharray", "stroke-dashoffset", "@keyframes producing", "@keyframes flowing", "@keyframes nodePulse"), "Dashboard CSS", errors)
     require(dashboard_js, ("createElementNS", "EventSource", "setInterval", "textContent"), "Dashboard app", errors)
     require(openai, ("display_name:", "short_description:", "default_prompt:", "$orchestrate-parallel-work"), "agents/openai.yaml", errors)
     try:
