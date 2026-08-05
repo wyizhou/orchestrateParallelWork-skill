@@ -27,6 +27,7 @@ fi
 [ -f "$support_dir/scripts/graph-core.mjs" ]
 [ -f "$support_dir/scripts/dashboard-server.mjs" ]
 [ -f "$support_dir/scripts/dashboard-state.mjs" ]
+[ -f "$support_dir/scripts/dashboardctl.mjs" ]
 [ -f "$support_dir/assets/schemas/graph-plan.schema.json" ]
 [ -f "$support_dir/assets/schemas/task-contract.schema.json" ]
 [ -f "$support_dir/assets/schemas/artifact-catalog.schema.json" ]
@@ -44,6 +45,7 @@ fi
 [ -f "$support_dir/references/validation.md" ]
 [ ! -e "$support_dir/references/codex-runtime.md" ]
 [ ! -e "$support_dir/README.md" ]
+node "$support_dir/scripts/graphctl.mjs" --help | grep -q '^Usage:'
 
 migration_tmp="$(mktemp -d)"
 cleanup_migration_tmp() {
@@ -89,6 +91,7 @@ printf '%s\n' "unrelated payload that must survive" >"$unrelated_dir/keep.txt"
 [ -f "$target_dir/agents/openai.yaml" ]
 [ -f "$target_dir/scripts/graphctl.mjs" ]
 [ -f "$target_dir/scripts/dashboard-server.mjs" ]
+[ -f "$target_dir/scripts/dashboardctl.mjs" ]
 [ -f "$target_dir/assets/schemas/graph-plan.schema.json" ]
 [ -f "$target_dir/assets/dashboard/index.html" ]
 [ -f "$target_dir/references/graph-contracts.md" ]

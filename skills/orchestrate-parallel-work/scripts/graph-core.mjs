@@ -346,7 +346,7 @@ function validateApproval(bundle, hash, errors) {
 function validateValidatorBrief(task, at, errors) {
   const brief = task.validation_brief;
   if (!isObject(brief)) return err(errors, "validator_brief", `${at}.validation_brief`, "validator tasks require a fact-only validation brief");
-  const allowed = new Set(["validation_id", "feature_points", "modules", "authoritative_input_refs", "artifact_refs", "verification_steps"]);
+  const allowed = new Set(["validation_id", "feature_points", "modules", "authoritative_input_refs", "artifact_refs", "verification_steps", "boundary_checks"]);
   for (const key of Object.keys(brief)) if (!allowed.has(key)) err(errors, "validator_bias", `${at}.validation_brief.${key}`, "field is not permitted in a fact-only validator brief");
   if (!isNonEmpty(brief.validation_id)) err(errors, "required", `${at}.validation_brief.validation_id`, "is required");
   for (const [index, feature] of list(brief.feature_points).entries()) {
@@ -357,7 +357,16 @@ function validateValidatorBrief(task, at, errors) {
     if (!isNonEmpty(module?.name) || !Array.isArray(module?.paths)) err(errors, "required", `${at}.validation_brief.modules[${index}]`, "requires name and paths");
     for (const key of Object.keys(module ?? {})) if (!["name", "paths"].includes(key)) err(errors, "validator_bias", `${at}.validation_brief.modules[${index}].${key}`, "field is not permitted");
   }
-  for (const key of ["authoritative_input_refs", "artifact_refs", "verification_steps"]) if (!Array.isArray(brief[key])) err(errors, "required", `${at}.validation_brief.${key}`, "must be an array");
+  for (const key of ["authoritative_input_refs", "artifact_refs", "verification_steps", "boundary_checks"]) if (!Array.isArray(brief[key])) err(errors, "required", `${at}.validation_brief.${key}`, "must be an array");
+  if (Array.isArray(brief.boundary_checks) && brief.boundary_checks.length === 0) err(errors, "boundary_coverage", `${at}.validation_brief.boundary_checks`, "must declare at least one independently generated boundary or invariant check");
+  const categories = new Set(["partition", "boundary", "precision", "overflow", "ordering", "determinism", "idempotence", "equivalence", "concurrency", "resource", "security", "compatibility"]);
+  for (const [index, check] of list(brief.boundary_checks).entries()) {
+    const checkAt = `${at}.validation_brief.boundary_checks[${index}]`;
+    for (const key of Object.keys(check ?? {})) if (!["id", "category", "invariant", "verification_steps"].includes(key)) err(errors, "validator_bias", `${checkAt}.${key}`, "field is not permitted");
+    if (!isNonEmpty(check?.id) || !isNonEmpty(check?.invariant)) err(errors, "required", checkAt, "requires id and invariant");
+    if (!categories.has(check?.category)) err(errors, "enum", `${checkAt}.category`, "is not a supported boundary category");
+    if (!Array.isArray(check?.verification_steps) || check.verification_steps.length === 0 || check.verification_steps.some((step) => !isNonEmpty(step))) err(errors, "required", `${checkAt}.verification_steps`, "requires at least one reproducible step");
+  }
 }
 
 export function deriveSummary(bundle, suppliedWaves) {

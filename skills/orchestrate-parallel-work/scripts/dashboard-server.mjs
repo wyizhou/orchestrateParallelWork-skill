@@ -225,15 +225,21 @@ export function parseArgs(argv) {
 }
 
 async function main() {
+  let dashboard;
   try {
     const options = parseArgs(process.argv.slice(2));
     if (options.help) {
       process.stdout.write("Usage: node dashboard-server.mjs --run-dir <path> [--port 8088]\n");
       return;
     }
-    const dashboard = await createDashboardServer(options);
+    dashboard = await createDashboardServer(options);
+    const stop = () => void dashboard.close();
+    process.once("SIGTERM", stop);
+    process.once("SIGINT", stop);
     process.stdout.write(`Orchestration dashboard: ${dashboard.url}\n`);
     await dashboard.closed;
+    process.removeListener("SIGTERM", stop);
+    process.removeListener("SIGINT", stop);
     process.stdout.write("Dashboard stopped after synchronizing the final run snapshot.\n");
   } catch (error) {
     const detail = error?.code === "EADDRINUSE" ? `Port ${error.port ?? DEFAULT_PORT} is already in use; choose another with --port.` : error.message;

@@ -18,7 +18,9 @@ Use this run-directory layout so the compiler and Dashboard share one control pl
 ├── node-runs.json
 ├── run.json
 ├── events.ndjson
-└── state.json
+├── state.json
+├── dashboard-runtime.json
+└── dashboard.log
 ```
 
 - `graph-plan.json` contains the immutable, approval-bound DAG identity, goal, capacity, Nodes, Edges, terminal outputs, and derived summary. Its canonical hash also covers `agent-types.json`, every Task Contract, and `artifacts/catalog.json`.
@@ -27,6 +29,7 @@ Use this run-directory layout so the compiler and Dashboard share one control pl
 - `artifact-registry.json` records actual immutable Artifact versions and provenance.
 - `events.ndjson` is an append-only factual event stream used by the Dashboard.
 - `state.json` is the monotonically increasing revision marker written last after an atomic control-plane update.
+- `dashboard-runtime.json` and `dashboard.log` are infrastructure-only lifecycle evidence managed by `dashboardctl.mjs`; they do not participate in plan hashing or orchestration state.
 
 Plan data and runtime state must not overwrite one another. Counts in `summary` are derived and must exactly match the contracts.
 
@@ -34,7 +37,7 @@ Plan data and runtime state must not overwrite one another. Counts in `summary` 
 
 Agent Types are reusable templates; Agent instances exist only in Node Run records. Include a top-level Planner/Coordinator and at least one read-only Validator type. Reject unused role types.
 
-Each Node references exactly one Task Contract, and each Task belongs to exactly one Node. Use `work`, `integration`, or `validation` Node types. A Node is large enough to deliver a useful feature/module result but small enough to isolate, retry, and verify independently.
+Each Node references exactly one Task Contract, and each Task belongs to exactly one Node. Use `work`, `integration`, or `validation` Node types. A Node is large enough to deliver a useful feature/module result but has exactly one independent reason to retry, invalidate, or reassign. Keep operations together when they enforce one tightly coupled invariant; split independently deliverable interfaces, owners, external effects, or failure domains.
 
 Data Edges bind a producer output port to a consumer input port through one Artifact Contract. Control Edges impose order without carrying an Artifact. Keep filenames in Artifact delivery metadata, not Edge identity. Allow fan-out; require all inputs at fan-in unless the approved contract states another cardinality.
 
@@ -42,9 +45,9 @@ Reject cycles, self-edges, unresolved references, incompatible ports, orphan Nod
 
 ## Compile Task and Artifact contracts
 
-Every Task freezes feature points, modules, authoritative inputs, owned and forbidden scopes, allowed external effects, constraints, completion criteria, output contracts, and both delivery gates. Overlapping same-wave write or external-effect scopes require a dependency or plan rejection.
+Every Task freezes feature points, modules, authoritative inputs, owned and forbidden scopes, allowed external effects, constraints, completion criteria, output contracts, and both delivery gates. Validator Tasks additionally freeze conformance steps and non-empty factual boundary checks. Overlapping same-wave write or external-effect scopes require a dependency or plan rejection.
 
-The Artifact Catalog declares planned business outputs and validation evidence. Every contract has exactly one producer. A zero-consumer Artifact must be a declared terminal output or evidence output. Before approval, actual Artifact count is zero.
+The Artifact Catalog declares planned business outputs and validation evidence. Every contract has exactly one producer. A zero-consumer Artifact must be a declared terminal output or evidence output. Report total contracts together with separate delivery/evidence counts; before approval, actual Artifact count is zero.
 
 Runtime Artifact versions are immutable. Record the producer Node/run/attempt/Agent, relative URI, file list, digest, status, timestamps, and validation evidence. A retry creates a new version. A changed accepted input version/digest makes transitive dependent results stale.
 

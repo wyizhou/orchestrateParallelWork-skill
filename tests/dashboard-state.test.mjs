@@ -13,7 +13,7 @@ async function fixture() {
   await writeFile(path.join(directory, "agent-types.json"), JSON.stringify({ agent_types:[{agent_type_id:"developer"},{agent_type_id:"validator"}] }));
   await writeFile(path.join(directory, "tasks/build.json"), JSON.stringify({task_id:"build",goal:"Build"}));
   await writeFile(path.join(directory, "tasks/verify.json"), JSON.stringify({task_id:"verify",goal:"Verify"}));
-  await writeFile(path.join(directory, "artifacts/catalog.json"), JSON.stringify({artifacts:[{artifact_contract_id:"code-1",artifact_type:"source_code"}]}));
+  await writeFile(path.join(directory, "artifacts/catalog.json"), JSON.stringify({artifacts:[{artifact_contract_id:"code-1",artifact_type:"source_code",purpose:"delivery"},{artifact_contract_id:"code-test",artifact_type:"check_result",purpose:"evidence"}]}));
   await writeFile(path.join(directory, "artifact-payloads/code.json"), JSON.stringify({artifact_contract_id:"code-1",files:[{path:"src/a.js"}]}));
   await writeFile(path.join(directory, "artifact-registry.json"), JSON.stringify({artifacts:[{artifact_id:"code-1-v1",artifact_contract_id:"code-1",status:"accepted"}]}));
   await writeFile(path.join(directory, "node-runs.json"), JSON.stringify({coordinator_agent_instance_id:"coordinator",entries:[{node_id:"build",status:"accepted",self_checks:[{gate:"test_gate",status:"passed"},{gate:"lint_gate",status:"passed"}]},{node_id:"verify",status:"active",agent_instance_id:"validator-1"}]}));
@@ -24,7 +24,7 @@ async function fixture() {
 test("loadSnapshot aggregates landed files, counts capacity, and ignores partial event", async (t) => {
   const directory = await fixture(); t.after(() => rm(directory,{recursive:true,force:true}));
   const value = await loadSnapshot(directory);
-  assert.deepEqual(value.counts,{agent_roles:2,agent_instances:2,nodes:2,edges:1,tasks:2,planned_artifacts:1,generated_artifacts:1});
+  assert.deepEqual(value.counts,{agent_roles:2,agent_instances:2,nodes:2,edges:1,tasks:2,planned_artifacts:2,planned_deliverables:1,planned_evidence:1,generated_artifacts:1,generated_deliverables:1,generated_evidence:0});
   assert.equal(value.capacity.effective,6);
   assert.equal(value.graph.edges[0].status,"flowing");
   assert.equal(value.graph.nodes[0].test_status,"passed");

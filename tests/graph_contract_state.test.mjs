@@ -95,6 +95,7 @@ function validBundle() {
     authoritative_input_refs: ["request://original"],
     artifact_refs: ["build-result"],
     verification_steps: ["Run declared checks and record observations"],
+    boundary_checks: [{ id: "BOUNDARY-1", category: "boundary", invariant: "Boundary inputs preserve the declared result contract", verification_steps: ["Exercise one valid boundary and one invalid neighbor"] }],
   };
 
   return {
@@ -178,6 +179,7 @@ function parallelBundle() {
       authoritative_input_refs: ["request://original"],
       artifact_refs: [],
       verification_steps: ["Observe the assigned external facts"],
+      boundary_checks: [{ id: `${id}-boundary`, category: "determinism", invariant: "Repeated observations are stable", verification_steps: ["Repeat the observation twice and compare raw results"] }],
     };
     return task;
   };
@@ -305,6 +307,22 @@ test("validator brief rejects persuasive or conclusion-bearing fields", () => {
   bundle.tasks[1].validation_brief.expected_conclusion = "The implementation is correct";
   const result = validateBundle(bundle);
   assert(result.errors.some((item) => item.code === "validator_bias"));
+});
+
+test("validator brief requires reproducible boundary coverage", () => {
+  const missing = validBundle();
+  delete missing.tasks[1].validation_brief.boundary_checks;
+  assert(validateBundle(missing).errors.some((item) => item.code === "required" && item.path.endsWith("boundary_checks")));
+
+  const empty = validBundle();
+  empty.tasks[1].validation_brief.boundary_checks = [];
+  assert(validateBundle(empty).errors.some((item) => item.code === "boundary_coverage"));
+
+  const invalid = validBundle();
+  invalid.tasks[1].validation_brief.boundary_checks = [{ id: "edge", category: "conclusion", invariant: "The result is correct", verification_steps: [] }];
+  const result = validateBundle(invalid);
+  assert(result.errors.some((item) => item.code === "enum"));
+  assert(result.errors.some((item) => item.path.endsWith("verification_steps")));
 });
 
 test("every node requires test and lint gates with evidence", () => {

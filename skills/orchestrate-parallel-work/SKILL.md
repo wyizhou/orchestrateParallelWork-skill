@@ -34,16 +34,16 @@ description: 把复杂目标编译为可审批、可追踪的 DAG，使用类型
 1. 冻结目标、非目标、权威输入、约束、权限、写入范围、整体验收和终端产物。
 2. 规划可复用的 Agent Type；必须包含只读、不可修复产物的 Validator 类型。
 3. 建立 DAG。Node 是最小可交付单元；Edge 绑定来源输出端口和目标输入端口，数据身份使用 Artifact Contract 而不是文件名。
-4. 为每个 Node 生成一个 Task Contract，并声明输入、输出、功能点、模块、边界、测试、lint、验收和失败策略。
+4. 为每个 Node 生成一个 Task Contract，并声明输入、输出、功能点、模块、边界、测试、lint、验收和失败策略。一个 Node 应只有一个独立重试/失效理由；紧密共享同一不变量的解析、规范化与聚合可以保留为共同基础，能独立交付的接口或写入面必须拆开。
 5. 建立 Artifact Catalog；包含业务产物以及每个 Node 的测试和 lint 证据产物。
 6. 计算串行、并行或串并行拓扑波次，并检查同波次写入与外部影响冲突。
-7. 从本 Skill 目录解析脚本路径，使用 `node <skill-dir>/scripts/graphctl.mjs validate <plan-directory>` 编译并验证完整契约目录。不要执行未通过编译的 Graph。
+7. 从本 Skill 目录解析脚本路径，使用 `node <skill-dir>/scripts/graphctl.mjs validate <plan-directory>` 编译并验证完整契约目录。Schema、references 和 `graphctl` 输出是规划接口；除非工具自身失败，不要读取 `graph-core.mjs` 或 Dashboard 实现来推断合同。不要执行未通过编译的 Graph。
 
 V1 只允许 DAG。用新 attempt 表示重试，用新计划版本表示结构、范围或契约变化；不要用任意循环隐藏终止条件。
 
 ## 3. Materialize and show the control plane
 
-在运行目录落地 Graph、Agent Type、Task 和 Artifact 契约，用 `graphctl.mjs summary <plan-directory> --json`复核派生统计，并按 [localhost Dashboard](references/dashboard.md) 使用 `<skill-dir>/scripts/dashboard-server.mjs` 启动只读页面。Dashboard 默认绑定 `127.0.0.1:8088`；它不是 Agent，不占用 Agent 容量。
+在运行目录落地 Graph、Agent Type、Task 和 Artifact 契约，用 `graphctl.mjs summary <plan-directory> --json`复核派生统计，并按 [localhost Dashboard](references/dashboard.md) 使用 `<skill-dir>/scripts/dashboardctl.mjs start` 启动可跨 Agent 回合存活的只读页面，再以 `dashboardctl.mjs status` 验证健康和计划身份。Dashboard 默认绑定 `127.0.0.1:8088`；它不是 Agent，不占用 Agent 容量。不要直接以前台 `dashboard-server.mjs` 作为普通编排启动方式，也不要在未复核状态时声称页面仍在线。
 
 向用户同时交付聊天摘要和 Dashboard 地址。摘要必须包含：
 
@@ -52,7 +52,7 @@ Plan ID / Version / Hash:
 Agent 角色类型数 / 预计峰值 Agents:
 Node 数 / Edge 数:
 Task 数:
-计划 Artifact 数 / 已生成 Artifact 数（批准前必须为 0）:
+计划 Artifact 数（交付 / 证据） / 已生成 Artifact 数（批准前必须为 0）:
 有效容量与预计峰值:
 执行形态与拓扑波次:
 测试、lint 等价检查或其他批准例外:
@@ -98,16 +98,16 @@ Artifact Catalog 是批准前的计划契约；Artifact Registry 只登记实际
 
 ## 7. Validate facts independently
 
-每个功能点和模块至少映射到一个未参与其实现的 Validator。Validator 第一轮只接收结构化事实白名单：功能点及预期行为、模块及路径、权威输入引用、Artifact 引用和可复现检查步骤。
+每个功能点和模块至少映射到一个未参与其实现的 Validator。Validator 第一轮只接收结构化事实白名单：功能点及预期行为、模块及路径、权威输入引用、Artifact 引用、可复现一致性步骤，以及非空的事实型 `boundary_checks`。边界检查必须覆盖适用的输入分区、精度/溢出、排序/时间、确定性/幂等、跨接口等价、并发/资源或安全边界；现有测试通过不能替代独立生成的边界输入。
 
 不要向 Validator 提供实现者总结、自评、论证、推荐结论、预期结论、已知缺陷导向或修复叙事。Validator 默认只读，只输出 expected/observed、命令或步骤、退出码、状态、证据和覆盖缺口；不得修改产物。
 
-Validator 未通过时由 Coordinator 创建修复 attempt，并在修复后进行定向复验。独立性不可用时，必须在计划中作为例外获得批准并在最终交付披露。
+高风险或跨多个信任边界的交付使用两个独立 Validator Node，分别执行合同一致性和边界/属性探测；小型任务可由同一 Validator 执行两部分。Validator 未通过时由 Coordinator 创建修复 attempt，并在修复后进行定向复验。独立性不可用时，必须在计划中作为例外获得批准并在最终交付披露。
 
 ## 8. Report and close
 
-保持 Dashboard 与落地的 Graph、Task、Artifact、Registry 和事件同步。只有终端产物集成且独立验证通过，计划才能标记 `completed`。
+保持 Dashboard 与落地的 Graph、Task、Artifact、Registry 和事件同步；每个波次和最终写入前用 `dashboardctl.mjs status` 复核，非终态意外退出时检查日志并恢复。只有终端产物集成且独立验证通过，计划才能标记 `completed`。
 
 结束时先原子写入全部最终 Task、Artifact、Registry、Node Run 和事实事件，再把 `state.json` 作为最后一次写入递增 revision 并设置 `completed`、`failed`、`cancelled` 或其他实际终态。不要在最终 revision 落地前停止 Dashboard。服务检测到终态后会发布最终 Snapshot，等待已连接浏览器完成渲染确认，并在5秒超时兜底后自动关闭；当前页面保留最终画面且停止重连，持久化运行目录可供以后重新启动 Dashboard 检查。Coordinator 不得提前强制终止该进程。
 
-最终报告批准版本、实际波次与峰值、Node 状态、Artifact 版本、测试/lint/集成/独立验证证据、偏差、未解决风险、最终 Dashboard revision 和服务已关闭状态。
+最终报告批准版本、实际波次与峰值、Node 状态、Artifact 版本、测试/lint/集成/独立验证证据、边界检查覆盖与缺口、偏差、未解决风险、最终 Dashboard revision 和经实际健康检查确认的服务状态。不得仅因计划内检查通过就声称“没有未解决风险”。

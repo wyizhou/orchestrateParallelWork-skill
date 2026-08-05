@@ -4,15 +4,20 @@ Read this reference before materializing a plan or starting, inspecting, or stop
 
 ## Start the read-only service
 
-Require Node.js and run:
+Require Node.js. Start the Dashboard through the lifecycle controller so it survives the Agent command/session that launched it:
 
 ```bash
-node scripts/dashboard-server.mjs --run-dir <absolute-run-directory>
+node scripts/dashboardctl.mjs start --run-dir <absolute-run-directory>
+node scripts/dashboardctl.mjs status --run-dir <absolute-run-directory>
 ```
 
-The server binds only `127.0.0.1`, defaults to port `8088`, and accepts `--port <number>` as the only network override. It provides no authentication, TLS, login, remote bind, or write API. If the port is occupied, report the conflict and ask for an explicit alternative; do not silently move.
+The controller starts `dashboard-server.mjs` as a detached process, stores infrastructure-only metadata in `dashboard-runtime.json`, appends logs to `dashboard.log`, waits for `/healthz` and verifies the served plan identity before reporting success. Never claim the Dashboard is live from process creation or a previous curl alone; run `status` after launch, at each scheduler wave, before presenting the URL, and before the final report.
+
+The server binds only `127.0.0.1`, defaults to port `8088`, and accepts `--port <number>` as the only network override. It provides no authentication, TLS, login, remote bind, or orchestration write API. If the port is occupied, report the conflict and ask for an explicit alternative; do not silently move. Do not launch the foreground server directly during ordinary orchestration; reserve it for development and server-level tests.
 
 The Dashboard process is control-plane infrastructure, not an Agent, and does not count toward `effective_capacity`.
+
+If `status` reports stopped before the run reaches a terminal revision, inspect `dashboard.log`, restart through `dashboardctl.mjs start`, verify the exact plan identity, and disclose the interruption. Do not silently treat a restarted retrospective server as proof that continuous live synchronization occurred.
 
 ## Keep state synchronized
 
@@ -27,6 +32,12 @@ At the end of a run, atomically land all final Tasks, Artifacts, registries, Nod
 When a running Dashboard observes the transition, it publishes a terminal SSE event. Each connected browser refetches and renders the exact final revision, then sends a transport-only acknowledgement that changes no orchestration data. After all connected browsers acknowledge, or after the five-second grace period expires, the server sends a shutdown event, closes its SSE clients, and stops itself. The rendered page must retain the final Graph and show that the server stopped instead of polling or reconnecting forever.
 
 The run directory remains authoritative after shutdown. Refreshing the old HTTP page cannot work once the server has stopped; restart the same command later to inspect a persisted completed run. A Dashboard started after a run is already terminal stays open for retrospective inspection because automatic shutdown applies only to a terminal transition observed during that server session.
+
+For an already-terminal retrospective server, stop it explicitly when inspection ends:
+
+```bash
+node scripts/dashboardctl.mjs stop --run-dir <absolute-run-directory>
+```
 
 Only inspect control-plane files within the selected run directory. Display external project paths as metadata; do not read arbitrary target or system files. Render Artifact text as text, not executable markup.
 

@@ -180,6 +180,8 @@ export async function loadSnapshot(runDir) {
   const agentTypes = arrayValue(agentTypesRaw, "agent_types", "types");
   const artifactContracts = arrayValue(artifactCatalogRaw, "artifacts", "contracts");
   const registry = arrayValue(registryRaw, "artifacts", "entries");
+  const evidenceContractIds = new Set(artifactContracts.filter((item) => item.purpose === "evidence").map((item) => idOf(item, "artifact_contract_id", "id")));
+  const acceptedRegistry = registry.filter((item) => ["accepted", "available", "integrated"].includes(item.status ?? "accepted"));
   const nodeRuns = arrayValue(nodeRunsRaw, "entries", "node_runs", "runs");
   const runsByNode = new Map(nodeRuns.map((item) => [idOf(item, "node_id", "task_id", "id"), item]));
   const normalizedNodes = nodes.map((node) => {
@@ -226,7 +228,11 @@ export async function loadSnapshot(runDir) {
       edges: normalizedEdges.length,
       tasks: tasks.length,
       planned_artifacts: artifactContracts.length,
-      generated_artifacts: registry.filter((item) => ["accepted", "available", "integrated"].includes(item.status ?? "accepted")).length,
+      planned_deliverables: artifactContracts.length - evidenceContractIds.size,
+      planned_evidence: evidenceContractIds.size,
+      generated_artifacts: acceptedRegistry.length,
+      generated_deliverables: acceptedRegistry.filter((item) => !evidenceContractIds.has(idOf(item, "artifact_contract_id", "id"))).length,
+      generated_evidence: acceptedRegistry.filter((item) => evidenceContractIds.has(idOf(item, "artifact_contract_id", "id"))).length,
     },
     agent_types: agentTypes,
     graph: { ...graph, nodes: normalizedNodes, edges: normalizedEdges },

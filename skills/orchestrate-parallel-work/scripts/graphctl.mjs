@@ -24,7 +24,7 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index++) {
     const value = argv[index];
     if (!value.startsWith("--")) positional.push(value);
-    else if (["--json", "--require-approval"].includes(value)) flags.set(value, true);
+    else if (["--json", "--require-approval", "--help"].includes(value)) flags.set(value, true);
     else {
       const next = argv[++index];
       if (!next || next.startsWith("--")) throw new Error(`${value} requires a value`);
@@ -48,7 +48,7 @@ async function main() {
   const [command, directoryValue] = positional;
   if (!command || !directoryValue || flags.has("--help")) {
     process.stdout.write(`${usage()}\n`);
-    return command ? 0 : 2;
+    return flags.has("--help") ? 0 : command ? 0 : 2;
   }
   const directory = path.resolve(directoryValue);
   const bundle = await loadBundle(directory);

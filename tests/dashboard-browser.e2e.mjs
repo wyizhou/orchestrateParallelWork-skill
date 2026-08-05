@@ -28,9 +28,9 @@ async function fixture() {
   ].map(([edge_id,from,to,kind,artifact_contract_ref]) => ({ edge_id,kind,from:{node_id:from,port:`${from}-out`},to:{node_id:to,port:`${to}-in`},...(artifact_contract_ref?{artifact_contract_ref}:{}) }));
   await json("graph-plan.json", { schema_version:"1.0",plan_id:"browser-plan",plan_version:1,status:"running",capacity:{hard_limit:15,runtime_limit:8,permission_limit:6,effective_capacity:6},nodes,edges,terminal_outputs:["final-bundle"],summary:{agent_role_count:6,node_count:6,edge_count:6,task_count:6,planned_artifact_count:3,estimated_peak_agents:4,execution_shape:"hybrid"} });
   await json("agent-types.json", { agent_types:["coordinator","researcher","developer","integrator","validator"].map((agent_type_id)=>({agent_type_id})) });
-  for (const node of nodes) await json(`tasks/${node.node_id}.json`, { task_id:node.node_id,node_id:node.node_id,goal:{plan:"Compile objective",research:"Research runtime contracts",api:"Build snapshot API",ui:"Render dependency graph",integrate:"Integrate dashboard",validate:"Independent acceptance"}[node.node_id],agent_type_id:node.agent_type_id,feature_points:[{id:`fp-${node.node_id}`,expected_behavior:`${node.node_id} behaves as contracted`}],modules:[{name:node.node_id,paths:[`src/${node.node_id}`]}],authoritative_inputs:["goal-contract"],inputs:[],outputs:[{port:`${node.node_id}-out`,artifact_contract_ref:node.node_id==="api"?"api-bundle":node.node_id==="ui"?"ui-bundle":node.node_id==="integrate"?"final-bundle":"research-report"}],constraints:["Read-only dashboard"],owned_scopes:[`src/${node.node_id}`],forbidden_scopes:["unrelated"],allowed_external_effects:[],completion_criteria:["Contract delivered"],self_validation:{test_gate:{mode:"command",steps:["npm test"],pass_condition:"exit 0",evidence_contract_ref:`${node.node_id}-test`},lint_gate:{mode:"command",steps:["npm run lint"],pass_condition:"exit 0",evidence_contract_ref:`${node.node_id}-lint`}},acceptance:{} });
+  for (const node of nodes) await json(`tasks/${node.node_id}.json`, { task_id:node.node_id,node_id:node.node_id,goal:{plan:"Compile objective",research:"Research runtime contracts",api:"Build snapshot API",ui:"Render dependency graph",integrate:"Integrate dashboard",validate:"Independent acceptance"}[node.node_id],agent_type_id:node.agent_type_id,feature_points:[{id:`fp-${node.node_id}`,expected_behavior:`${node.node_id} behaves as contracted`}],modules:[{name:node.node_id,paths:[`src/${node.node_id}`]}],authoritative_inputs:["goal-contract"],inputs:[],outputs:[{port:`${node.node_id}-out`,artifact_contract_ref:node.node_id==="api"?"api-bundle":node.node_id==="ui"?"ui-bundle":node.node_id==="integrate"?"final-bundle":"research-report"}],constraints:["Read-only dashboard"],owned_scopes:[`src/${node.node_id}`],forbidden_scopes:["unrelated"],allowed_external_effects:[],completion_criteria:["Contract delivered"],self_validation:{test_gate:{mode:"command",steps:["npm test"],pass_condition:"exit 0",evidence_contract_ref:`${node.node_id}-test`},lint_gate:{mode:"command",steps:["npm run lint"],pass_condition:"exit 0",evidence_contract_ref:`${node.node_id}-lint`}},acceptance:{},...(node.node_id==="validate"?{validation_brief:{validation_id:"validate-browser",feature_points:[{id:"fp-validate",expected_behavior:"validate behaves as contracted"}],modules:[{name:"validate",paths:["src/validate"]}],authoritative_input_refs:["goal-contract"],artifact_refs:["final-bundle"],verification_steps:["Run the declared suite"],boundary_checks:[{id:"BOUNDARY-1",category:"determinism",invariant:"Repeated rendering preserves the same facts",verification_steps:["Render twice and compare"]}]}}:{}) });
   const contracts = [
-    ["research-report","report","intermediate","research",["api","ui"]], ["api-bundle","source_code","intermediate","api",["integrate"]], ["ui-bundle","source_code","delivery","ui",["integrate"]], ["final-bundle","source_code","delivery","integrate",["validate"]],
+    ["research-report","report","intermediate","research",["api","ui"]], ["api-bundle","source_code","intermediate","api",["integrate"]], ["ui-bundle","source_code","delivery","ui",["integrate"]], ["final-bundle","source_code","delivery","integrate",["validate"]], ["research-test","check_result","evidence","research",[]], ["research-lint","check_result","evidence","research",[]],
   ].map(([artifact_contract_id,artifact_type,purpose,producer,consumers])=>({artifact_contract_id,artifact_type,schema_version:"1.0",purpose,producer:{node_id:producer,port:`${producer}-out`},consumers:consumers.map((node_id)=>({node_id,port:`${node_id}-in`})),delivery:{format:"json",path:`artifacts/${artifact_contract_id}.json`},acceptance_checks:["schema valid"],required:true}));
   await json("artifacts/catalog.json", { artifacts:contracts });
   await json("artifact-registry.json", { artifacts:[{artifact_id:"research-report-v1",artifact_contract_id:"research-report",artifact_version:1,status:"accepted",producer:{node_id:"research",node_run_id:"run-research-a1",attempt:1,agent_instance_id:"agent-research-1"},digest:`sha256:${"a".repeat(64)}`,created_at:"2026-08-05T09:01:00Z",accepted_at:"2026-08-05T09:02:00Z",validation_evidence_refs:["research-test"]}] });
@@ -117,6 +117,8 @@ try {
   await page.locator('[data-view="graph"]').waitFor();
   assert.equal(await page.locator(".node").count(),6);
   assert.equal(await page.locator(".edge-label").count(),6);
+  await page.getByText("Artifacts 已接受 · 交付 / 证据",{exact:true}).waitFor();
+  assert.match(await page.locator("#summary").textContent(),/1 \/ 0/);
   assert.match(await page.locator(".node.active,.node.running").first().evaluate((node)=>getComputedStyle(node).animationName),/nodePulse/);
   await page.emulateMedia({reducedMotion:"reduce"});
   assert.equal(await page.locator(".node.active,.node.running").first().evaluate((node)=>getComputedStyle(node).animationName),"none");
@@ -124,6 +126,9 @@ try {
 
   await page.locator('.node[data-node-id="api"]').click();
   await page.locator("#inspector-title").filter({hasText:"Build snapshot API"}).waitFor();
+  await page.locator("#clear-selection").click();
+  await page.locator('.node[data-node-id="validate"]').click();
+  await page.locator("#inspector-body").filter({hasText:"BOUNDARY-1"}).waitFor();
   await page.getByRole("button",{name:/任务/}).click();
   await page.getByLabel("搜索任务").fill("no-such-task");
   await page.getByText("当前条件下没有匹配的 Task。").waitFor();
@@ -132,6 +137,7 @@ try {
   await page.getByRole("dialog").waitFor();
   await page.keyboard.press("Escape");
   await page.getByRole("button",{name:/产物/}).click();
+  assert.match(await page.locator("#artifact-summary").textContent(),/4交付契约2证据契约/);
   await page.locator(".version").first().click();
   await page.getByText("Artifact 检查器",{exact:true}).waitFor();
   await page.keyboard.press("Escape");
