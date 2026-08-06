@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
-export const SCHEMA_VERSION = "1.0";
+export const SCHEMA_VERSION = "1.1";
 export const HARD_AGENT_LIMIT = 15;
 
 export const PLAN_TRANSITIONS = Object.freeze({
@@ -156,6 +156,62 @@ function checkGate(gate, at, errors) {
   if (gate.mode === "equivalent" && !isNonEmpty(gate.reason)) err(errors, "required", `${at}.reason`, "equivalent checks require a reason");
 }
 
+const PROFILE_MODES = new Set(["lightweight", "standard", "assurance"]);
+const RISK_LEVELS = new Set(["low", "medium", "high"]);
+const BOUNDARY_CATEGORIES = new Set(["partition", "boundary", "precision", "overflow", "ordering", "determinism", "idempotence", "equivalence", "concurrency", "resource", "security", "compatibility"]);
+const BOUNDARY_SAMPLING = new Set(["representative", "boundary-pair", "adjacent-pair", "exhaustive-declared"]);
+
+function validateExecutionProfile(plan, nodes, tasks, errors) {
+  const profile = plan.execution_profile;
+  if (!isObject(profile)) return err(errors, "profile", "graphPlan.execution_profile", "is required");
+  const allowed = new Set(["mode", "risk_level", "integration_strategy", "evidence_strategy"]);
+  for (const key of Object.keys(profile)) if (!allowed.has(key)) err(errors, "profile", `graphPlan.execution_profile.${key}`, "unsupported profile field");
+  if (!PROFILE_MODES.has(profile.mode)) err(errors, "profile", "graphPlan.execution_profile.mode", "must be lightweight, standard, or assurance");
+  if (!RISK_LEVELS.has(profile.risk_level)) err(errors, "profile", "graphPlan.execution_profile.risk_level", "must be low, medium, or high");
+  if (!["inline", "dedicated"].includes(profile.integration_strategy)) err(errors, "profile", "graphPlan.execution_profile.integration_strategy", "must be inline or dedicated");
+  if (!["combined", "separate"].includes(profile.evidence_strategy)) err(errors, "profile", "graphPlan.execution_profile.evidence_strategy", "must be combined or separate");
+
+  const nonValidation = nodes.filter((node) => node.node_type !== "validation");
+  const validation = nodes.filter((node) => node.node_type === "validation");
+  if (profile.mode === "lightweight") {
+    if (profile.risk_level !== "low") err(errors, "profile", "graphPlan.execution_profile", "lightweight mode is limited to low-risk work");
+    if (nonValidation.length > 4) err(errors, "profile", "graphPlan.execution_profile", "lightweight mode allows at most four non-validation nodes");
+    if (validation.length !== 1) err(errors, "profile", "graphPlan.execution_profile", "lightweight mode requires exactly one validator node");
+    if (profile.integration_strategy !== "inline") err(errors, "profile", "graphPlan.execution_profile.integration_strategy", "lightweight mode must use inline integration");
+    if (profile.evidence_strategy !== "combined") err(errors, "profile", "graphPlan.execution_profile.evidence_strategy", "lightweight mode must combine test and lint evidence per node");
+  }
+  if (profile.risk_level === "high") {
+    if (profile.mode !== "assurance") err(errors, "profile", "graphPlan.execution_profile.mode", "high-risk work requires assurance mode");
+    if (validation.length < 2) err(errors, "profile", "graphPlan.execution_profile", "high-risk work requires at least two independent validator nodes");
+    const focuses = new Set(tasks.filter((task) => validation.some((node) => node.task_ref === task.task_id)).map((task) => task.validation_brief?.validation_focus));
+    if (!focuses.has("conformance") || !focuses.has("boundary")) err(errors, "profile", "graphPlan.execution_profile", "high-risk work requires separate conformance and boundary validator focuses");
+  }
+  if (profile.integration_strategy === "inline" && nodes.some((node) => node.node_type === "integration")) {
+    err(errors, "profile", "graphPlan.execution_profile.integration_strategy", "inline integration cannot include a dedicated integration node");
+  }
+  for (const task of tasks) {
+    const testRef = task?.self_validation?.test_gate?.evidence_contract_ref;
+    const lintRef = task?.self_validation?.lint_gate?.evidence_contract_ref;
+    if (!testRef || !lintRef) continue;
+    if (profile.evidence_strategy === "combined" && testRef !== lintRef) err(errors, "profile", `tasks.${task.task_id}.self_validation`, "combined evidence strategy requires both gates to reference one evidence contract");
+    if (profile.evidence_strategy === "separate" && testRef === lintRef) err(errors, "profile", `tasks.${task.task_id}.self_validation`, "separate evidence strategy requires distinct test and lint evidence contracts");
+  }
+}
+
+function validateBoundaryDimension(dimension, at, errors) {
+  const allowed = new Set(["id", "category", "subject", "partitions", "minimum_cases", "sampling"]);
+  for (const key of Object.keys(dimension ?? {})) if (!allowed.has(key)) err(errors, "boundary_dimension", `${at}.${key}`, "unsupported boundary dimension field");
+  if (!isNonEmpty(dimension?.id) || !isNonEmpty(dimension?.subject)) err(errors, "required", at, "requires id and subject");
+  if (!BOUNDARY_CATEGORIES.has(dimension?.category)) err(errors, "enum", `${at}.category`, "is not a supported boundary category");
+  const partitions = list(dimension?.partitions);
+  if (partitions.length === 0 || partitions.some((item) => !isNonEmpty(item)) || new Set(partitions).size !== partitions.length) err(errors, "boundary_coverage", `${at}.partitions`, "requires unique factual partitions");
+  if (!Number.isInteger(dimension?.minimum_cases) || dimension.minimum_cases < partitions.length) err(errors, "boundary_coverage", `${at}.minimum_cases`, "must be an integer covering at least every declared partition");
+  if (!BOUNDARY_SAMPLING.has(dimension?.sampling)) err(errors, "enum", `${at}.sampling`, "is not a supported sampling strategy");
+  if (["precision", "ordering"].includes(dimension?.category) && !["adjacent-pair", "exhaustive-declared"].includes(dimension?.sampling)) {
+    err(errors, "boundary_coverage", `${at}.sampling`, "precision and ordering dimensions require adjacent-pair or exhaustive-declared sampling");
+  }
+}
+
 function validateBasicDocuments(bundle, errors) {
   const { graphPlan, agentTypes, tasks, artifactCatalog } = bundle;
   for (const [name, document] of Object.entries({ graphPlan, agentTypes, artifactCatalog })) {
@@ -194,6 +250,7 @@ export function validateBundle(bundle, { requireApproval = false } = {}) {
   if (!isNonEmpty(plan.plan_id)) err(errors, "required", "graphPlan.plan_id", "is required");
   if (!Number.isInteger(plan.plan_version) || plan.plan_version < 1) err(errors, "required", "graphPlan.plan_version", "must be a positive integer");
   if (!roles.some((role) => role.validator === true)) err(errors, "validator", "agentTypes.agent_types", "must define a validator role");
+  validateExecutionProfile(plan, nodes, tasks, errors);
 
   const referencedRoles = new Set();
   const referencedTasks = new Set();
@@ -274,6 +331,14 @@ export function validateBundle(bundle, { requireApproval = false } = {}) {
       validateValidatorBrief(task, `tasks[${index}]`, errors);
       if (list(task.owned_scopes).length || list(task.allowed_external_effects).length) err(errors, "validator", `tasks[${index}]`, "validator task must be read-only and have no external effects");
       for (const artifactRef of list(task.validation_brief?.artifact_refs)) if (!contractMap.has(artifactRef)) err(errors, "unknown_ref", `tasks[${index}].validation_brief.artifact_refs`, `unknown artifact contract ${artifactRef}`);
+    } else {
+      if (!Array.isArray(task.boundary_dimensions) || task.boundary_dimensions.length === 0) err(errors, "boundary_coverage", `tasks[${index}].boundary_dimensions`, "non-validator tasks require at least one declared boundary dimension");
+      const dimensionIds = new Set();
+      for (const [dimensionIndex, dimension] of list(task.boundary_dimensions).entries()) {
+        validateBoundaryDimension(dimension, `tasks[${index}].boundary_dimensions[${dimensionIndex}]`, errors);
+        if (dimensionIds.has(dimension?.id)) err(errors, "duplicate_id", `tasks[${index}].boundary_dimensions[${dimensionIndex}].id`, `duplicate id ${dimension?.id}`);
+        dimensionIds.add(dimension?.id);
+      }
     }
   }
 
@@ -308,13 +373,24 @@ export function validateBundle(bundle, { requireApproval = false } = {}) {
   }
 
   const validationCoverage = new Set();
+  const boundaryCoverage = new Map();
   for (const task of tasks) if (roleMap.get(task.agent_type_id)?.validator) {
     for (const feature of list(task.validation_brief?.feature_points)) validationCoverage.add(`feature:${feature.id}:${feature.expected_behavior}`);
     for (const module of list(task.validation_brief?.modules)) validationCoverage.add(`module:${module.name}:${list(module.paths).slice().sort().join("|")}`);
+    for (const check of list(task.validation_brief?.boundary_checks)) {
+      if (!boundaryCoverage.has(check.dimension_ref)) boundaryCoverage.set(check.dimension_ref, []);
+      boundaryCoverage.get(check.dimension_ref).push(check);
+    }
   }
   for (const task of tasks) if (!roleMap.get(task.agent_type_id)?.validator) {
     for (const feature of list(task.feature_points)) if (!validationCoverage.has(`feature:${feature.id}:${feature.expected_behavior}`)) err(errors, "validator_coverage", `tasks.${task.task_id}.feature_points.${feature.id}`, "is not covered exactly by an independent validator");
     for (const module of list(task.modules)) if (!validationCoverage.has(`module:${module.name}:${list(module.paths).slice().sort().join("|")}`)) err(errors, "validator_coverage", `tasks.${task.task_id}.modules.${module.name}`, "is not covered exactly by an independent validator");
+    for (const dimension of list(task.boundary_dimensions)) {
+      const ref = `${task.task_id}:${dimension.id}`;
+      const checks = boundaryCoverage.get(ref) ?? [];
+      const covered = checks.some((check) => check.category === dimension.category && dimension.partitions.every((partition) => list(check.partitions).includes(partition)) && check.minimum_cases >= dimension.minimum_cases);
+      if (!covered) err(errors, "validator_coverage", `tasks.${task.task_id}.boundary_dimensions.${dimension.id}`, `requires a validator boundary check covering ${ref}, all partitions, and minimum cases`);
+    }
   }
 
   let summary = null;
@@ -346,9 +422,10 @@ function validateApproval(bundle, hash, errors) {
 function validateValidatorBrief(task, at, errors) {
   const brief = task.validation_brief;
   if (!isObject(brief)) return err(errors, "validator_brief", `${at}.validation_brief`, "validator tasks require a fact-only validation brief");
-  const allowed = new Set(["validation_id", "feature_points", "modules", "authoritative_input_refs", "artifact_refs", "verification_steps", "boundary_checks"]);
+  const allowed = new Set(["validation_id", "validation_focus", "feature_points", "modules", "authoritative_input_refs", "artifact_refs", "verification_steps", "boundary_checks"]);
   for (const key of Object.keys(brief)) if (!allowed.has(key)) err(errors, "validator_bias", `${at}.validation_brief.${key}`, "field is not permitted in a fact-only validator brief");
   if (!isNonEmpty(brief.validation_id)) err(errors, "required", `${at}.validation_brief.validation_id`, "is required");
+  if (!["conformance", "boundary", "combined"].includes(brief.validation_focus)) err(errors, "required", `${at}.validation_brief.validation_focus`, "must be conformance, boundary, or combined");
   for (const [index, feature] of list(brief.feature_points).entries()) {
     if (!isNonEmpty(feature?.id) || !isNonEmpty(feature?.expected_behavior)) err(errors, "required", `${at}.validation_brief.feature_points[${index}]`, "requires id and expected_behavior");
     for (const key of Object.keys(feature ?? {})) if (!["id", "expected_behavior"].includes(key)) err(errors, "validator_bias", `${at}.validation_brief.feature_points[${index}].${key}`, "field is not permitted");
@@ -359,12 +436,13 @@ function validateValidatorBrief(task, at, errors) {
   }
   for (const key of ["authoritative_input_refs", "artifact_refs", "verification_steps", "boundary_checks"]) if (!Array.isArray(brief[key])) err(errors, "required", `${at}.validation_brief.${key}`, "must be an array");
   if (Array.isArray(brief.boundary_checks) && brief.boundary_checks.length === 0) err(errors, "boundary_coverage", `${at}.validation_brief.boundary_checks`, "must declare at least one independently generated boundary or invariant check");
-  const categories = new Set(["partition", "boundary", "precision", "overflow", "ordering", "determinism", "idempotence", "equivalence", "concurrency", "resource", "security", "compatibility"]);
   for (const [index, check] of list(brief.boundary_checks).entries()) {
     const checkAt = `${at}.validation_brief.boundary_checks[${index}]`;
-    for (const key of Object.keys(check ?? {})) if (!["id", "category", "invariant", "verification_steps"].includes(key)) err(errors, "validator_bias", `${checkAt}.${key}`, "field is not permitted");
-    if (!isNonEmpty(check?.id) || !isNonEmpty(check?.invariant)) err(errors, "required", checkAt, "requires id and invariant");
-    if (!categories.has(check?.category)) err(errors, "enum", `${checkAt}.category`, "is not a supported boundary category");
+    for (const key of Object.keys(check ?? {})) if (!["id", "category", "dimension_ref", "partitions", "minimum_cases", "invariant", "verification_steps"].includes(key)) err(errors, "validator_bias", `${checkAt}.${key}`, "field is not permitted");
+    if (!isNonEmpty(check?.id) || !isNonEmpty(check?.dimension_ref) || !isNonEmpty(check?.invariant)) err(errors, "required", checkAt, "requires id, dimension_ref, and invariant");
+    if (!BOUNDARY_CATEGORIES.has(check?.category)) err(errors, "enum", `${checkAt}.category`, "is not a supported boundary category");
+    if (list(check?.partitions).length === 0 || list(check?.partitions).some((item) => !isNonEmpty(item))) err(errors, "boundary_coverage", `${checkAt}.partitions`, "requires factual partitions to exercise");
+    if (!Number.isInteger(check?.minimum_cases) || check.minimum_cases < list(check?.partitions).length) err(errors, "boundary_coverage", `${checkAt}.minimum_cases`, "must cover at least every declared partition");
     if (!Array.isArray(check?.verification_steps) || check.verification_steps.length === 0 || check.verification_steps.some((step) => !isNonEmpty(step))) err(errors, "required", `${checkAt}.verification_steps`, "requires at least one reproducible step");
   }
 }
@@ -383,6 +461,7 @@ export function deriveSummary(bundle, suppliedWaves) {
     planned_artifact_count: list(bundle.artifactCatalog?.artifacts).length,
     estimated_peak_agents: Math.min(capacity, maxWave > 0 ? maxWave + 1 : 1),
     execution_shape: hasParallel && hasSerial ? "hybrid" : hasParallel ? "parallel" : "serial",
+    orchestration_profile: bundle.graphPlan.execution_profile?.mode,
   };
 }
 
@@ -501,6 +580,7 @@ export function validateRuntimeRegistries(compiled, artifactRegistry, nodeRunReg
     const attemptKey = `${run.node_id}@${run.attempt}`;
     if (attemptKeys.has(attemptKey)) err(errors, "duplicate_attempt", `nodeRunRegistry.entries[${index}]`, `duplicate ${attemptKey}`);
     attemptKeys.add(attemptKey);
+    if (node?.node_type === "validation" && ["submitted", "accepted", "integrated"].includes(run.status)) validateValidationObservations(compiled, node, run, `nodeRunRegistry.entries[${index}]`, errors);
   }
   const artifactsByContract = new Map(list(artifactRegistry?.artifacts).map((artifact) => [artifact.artifact_contract_id, artifact]));
   for (const run of list(nodeRunRegistry?.entries)) {
@@ -517,6 +597,37 @@ export function validateRuntimeRegistries(compiled, artifactRegistry, nodeRunReg
   const capacity = compiled.bundle.graphPlan.capacity.effective_capacity;
   if (activeAgents.size > capacity) err(errors, "capacity", "nodeRunRegistry.entries", "active agents including coordinator exceed effective capacity");
   return { valid: errors.length === 0, errors };
+}
+
+function validateValidationObservations(compiled, node, run, at, errors) {
+  const task = compiled.bundle.tasks.find((item) => item.task_id === node.task_ref);
+  const declared = new Map(list(task?.validation_brief?.boundary_checks).map((check) => [check.id, check]));
+  const observations = list(run.validation_observations);
+  const observedIds = new Set();
+  for (const [index, observation] of observations.entries()) {
+    const observationAt = `${at}.validation_observations[${index}]`;
+    const check = declared.get(observation?.boundary_check_id);
+    if (!check) {
+      err(errors, "validation_evidence", `${observationAt}.boundary_check_id`, "does not reference a declared boundary check");
+      continue;
+    }
+    if (observedIds.has(check.id)) err(errors, "validation_evidence", `${observationAt}.boundary_check_id`, "duplicate boundary observation");
+    observedIds.add(check.id);
+    if (observation.dimension_ref !== check.dimension_ref) err(errors, "validation_evidence", `${observationAt}.dimension_ref`, "must match the declared dimension reference");
+    const cases = list(observation.cases);
+    if (cases.length < check.minimum_cases) err(errors, "validation_evidence", `${observationAt}.cases`, `requires at least ${check.minimum_cases} generated cases`);
+    const coveredPartitions = new Set(cases.map((item) => item?.partition));
+    for (const partition of check.partitions) if (!coveredPartitions.has(partition)) err(errors, "validation_evidence", `${observationAt}.cases`, `missing generated case for partition ${partition}`);
+    for (const [caseIndex, generated] of cases.entries()) {
+      const caseAt = `${observationAt}.cases[${caseIndex}]`;
+      for (const field of ["case_id", "partition", "generated_input_or_fixture_ref", "expected_fact", "observed_fact", "evidence_ref"]) if (!isNonEmpty(generated?.[field])) err(errors, "validation_evidence", `${caseAt}.${field}`, "is required");
+      if (!["passed", "failed"].includes(generated?.status)) err(errors, "validation_evidence", `${caseAt}.status`, "must be passed or failed");
+      if (["accepted", "integrated"].includes(run.status) && generated?.status !== "passed") err(errors, "validation_evidence", `${caseAt}.status`, "accepted validator runs require every generated case to pass");
+    }
+  }
+  for (const checkId of declared.keys()) if (!observedIds.has(checkId)) err(errors, "validation_evidence", `${at}.validation_observations`, `missing observation for ${checkId}`);
+  if (!Array.isArray(run.coverage_gaps)) err(errors, "validation_evidence", `${at}.coverage_gaps`, "must be an array, empty only when no factual gaps remain");
+  else if (["accepted", "integrated"].includes(run.status) && run.coverage_gaps.length > 0) err(errors, "validation_evidence", `${at}.coverage_gaps`, "accepted validator runs cannot retain coverage gaps");
 }
 
 export function assertNodeSubmission(task, nodeRun, artifactRegistry) {

@@ -32,12 +32,13 @@ description: 把复杂目标编译为可审批、可追踪的 DAG，使用类型
 由顶层 Planner/Coordinator：
 
 1. 冻结目标、非目标、权威输入、约束、权限、写入范围、整体验收和终端产物。
-2. 规划可复用的 Agent Type；必须包含只读、不可修复产物的 Validator 类型。
-3. 建立 DAG。Node 是最小可交付单元；Edge 绑定来源输出端口和目标输入端口，数据身份使用 Artifact Contract 而不是文件名。
-4. 为每个 Node 生成一个 Task Contract，并声明输入、输出、功能点、模块、边界、测试、lint、验收和失败策略。一个 Node 应只有一个独立重试/失效理由；紧密共享同一不变量的解析、规范化与聚合可以保留为共同基础，能独立交付的接口或写入面必须拆开。
-5. 建立 Artifact Catalog；包含业务产物以及每个 Node 的测试和 lint 证据产物。
-6. 计算串行、并行或串并行拓扑波次，并检查同波次写入与外部影响冲突。
-7. 从本 Skill 目录解析脚本路径，使用 `node <skill-dir>/scripts/graphctl.mjs validate <plan-directory>` 编译并验证完整契约目录。Schema、references 和 `graphctl` 输出是规划接口；除非工具自身失败，不要读取 `graph-core.mjs` 或 Dashboard 实现来推断合同。不要执行未通过编译的 Graph。
+2. 选择执行档位并写入 `execution_profile`：低风险且不超过四个非验证 Node 使用 `lightweight`；一般复杂工作使用 `standard`；高风险工作使用 `assurance`。轻量模式使用单一 Validator、无专用 Integration Node，并让每个 Node 的测试和 lint 共用一个证据 Artifact；高风险模式至少使用分别聚焦 `conformance` 与 `boundary` 的两个 Validator。
+3. 规划可复用的 Agent Type；必须包含只读、不可修复产物的 Validator 类型。
+4. 建立 DAG。Node 是最小可交付单元；Edge 绑定来源输出端口和目标输入端口，数据身份使用 Artifact Contract 而不是文件名。
+5. 为每个 Node 生成一个 Task Contract，并声明输入、输出、功能点、模块、边界维度、测试、lint、验收和失败策略。一个 Node 应只有一个独立重试/失效理由；紧密共享同一不变量的解析、规范化与聚合可以保留为共同基础，能独立交付的接口或写入面必须拆开。每个非 Validator Task 的 `boundary_dimensions` 必须声明事实型分区、最少样例数和取样策略；精度或排序维度必须使用相邻值或穷举已声明分区。
+6. 建立 Artifact Catalog；包含业务产物以及每个 Node 的测试和 lint 证据产物。轻量模式把同一 Node 的两道门合并到一个证据 Artifact；其他模式分开记录。没有实际 fan-in、跨模块集成或独立失效理由时不要创建 Integration Node。
+7. 计算串行、并行或串并行拓扑波次，并检查同波次写入与外部影响冲突。
+8. 从本 Skill 目录解析脚本路径，使用 `node <skill-dir>/scripts/graphctl.mjs validate <plan-directory>` 编译并验证完整契约目录。Schema、references 和 `graphctl` 输出是规划接口；除非工具自身失败，不要读取 `graph-core.mjs` 或 Dashboard 实现来推断合同。不要执行未通过编译的 Graph。
 
 V1 只允许 DAG。用新 attempt 表示重试，用新计划版本表示结构、范围或契约变化；不要用任意循环隐藏终止条件。
 
@@ -50,6 +51,7 @@ V1 只允许 DAG。用新 attempt 表示重试，用新计划版本表示结构�
 ```text
 Plan ID / Version / Hash:
 Agent 角色类型数 / 预计峰值 Agents:
+编排档位 / 风险等级 / 集成与证据策略:
 Node 数 / Edge 数:
 Task 数:
 计划 Artifact 数（交付 / 证据） / 已生成 Artifact 数（批准前必须为 0）:
@@ -98,9 +100,11 @@ Artifact Catalog 是批准前的计划契约；Artifact Registry 只登记实际
 
 ## 7. Validate facts independently
 
-每个功能点和模块至少映射到一个未参与其实现的 Validator。Validator 第一轮只接收结构化事实白名单：功能点及预期行为、模块及路径、权威输入引用、Artifact 引用、可复现一致性步骤，以及非空的事实型 `boundary_checks`。边界检查必须覆盖适用的输入分区、精度/溢出、排序/时间、确定性/幂等、跨接口等价、并发/资源或安全边界；现有测试通过不能替代独立生成的边界输入。
+每个功能点和模块至少映射到一个未参与其实现的 Validator。Validator 第一轮只接收结构化事实白名单：功能点及预期行为、模块及路径、权威输入引用、Artifact 引用、可复现一致性步骤，以及非空的事实型 `boundary_checks`。每个检查必须引用上游 `task_id:boundary_dimension_id`，覆盖其全部分区和最低样例数；Validator 自行生成具体输入，不接收实现者样例。现有测试通过不能替代独立生成的边界输入。
 
 不要向 Validator 提供实现者总结、自评、论证、推荐结论、预期结论、已知缺陷导向或修复叙事。Validator 默认只读，只输出 expected/observed、命令或步骤、退出码、状态、证据和覆盖缺口；不得修改产物。
+
+Validator 必须把每个声明检查的实际 `case_id`、分区、生成输入或 fixture 引用、expected/observed、状态和证据写入 Node Run 的 `validation_observations`，并明确 `coverage_gaps`。缺少分区、样例数不足、存在失败样例或仍有覆盖缺口时，Validator Run 不得接受。
 
 高风险或跨多个信任边界的交付使用两个独立 Validator Node，分别执行合同一致性和边界/属性探测；小型任务可由同一 Validator 执行两部分。Validator 未通过时由 Coordinator 创建修复 attempt，并在修复后进行定向复验。独立性不可用时，必须在计划中作为例外获得批准并在最终交付披露。
 

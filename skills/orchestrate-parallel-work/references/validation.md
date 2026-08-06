@@ -35,7 +35,14 @@ The Validator must not be an Agent instance that produced an Artifact under test
 
 ## Require conformance and boundary validation
 
-Do not limit independent validation to replaying implementer tests or checking only the examples named in the requirement. For every Validator Task, derive at least one applicable `boundary_checks` entry from the data types, state transitions, interfaces, and invariants of the covered feature/module. Each entry contains only `id`, `category`, `invariant`, and `verification_steps`.
+Do not limit independent validation to replaying implementer tests or checking only the examples named in the requirement. For every non-Validator Task, derive at least one applicable `boundary_dimensions` entry from the data types, state transitions, interfaces, and invariants of the covered feature/module. Declare:
+
+- `id`, `category`, and a factual `subject`;
+- named `partitions` that make omitted cases visible;
+- `minimum_cases`, never lower than the partition count; and
+- `sampling`: `representative`, `boundary-pair`, `adjacent-pair`, or `exhaustive-declared`.
+
+Every Validator `boundary_checks` entry references one of these dimensions through `<task_id>:<dimension_id>` and repeats the required partitions and minimum case count. The compiler rejects category mismatches, missing partitions, and weaker case counts. Use standalone `external:<dimension-id>` only when the Validator checks an authoritative external fact rather than an upstream Task.
 
 Consider these categories and include every materially applicable one:
 
@@ -46,7 +53,7 @@ Consider these categories and include every materially applicable one:
 - concurrency, partial failure, stale state, bounded resources, and size limits;
 - permission boundaries, untrusted text, path handling, compatibility, and recovery.
 
-The Planner states the invariant, not the expected conclusion or suspected defect. The Validator chooses concrete cases without receiving implementer summaries. A check is not satisfied merely because the existing suite is green: preserve the independently generated input, observed output, and exit code as evidence.
+The Planner states the invariant and partitions, not the expected conclusion, suspected defect, or concrete test values. The Validator chooses concrete cases without receiving implementer summaries. For timestamps, explicitly partition whole-second, millisecond, finer supported precision, adjacent representable values, offset-equivalent instants, and ties when applicable. A check is not satisfied merely because the existing suite is green.
 
 Use two independent Validator Nodes—contract conformance and boundary/property probing—when the deliverable is high-risk, spans multiple trust boundaries, or has enough surface area that one context would dilute coverage. For smaller work, one Validator Node may run both sections, but its brief must still contain `verification_steps` and non-empty `boundary_checks`.
 
@@ -65,6 +72,6 @@ Evidence reference:
 Coverage gap, if any:
 ```
 
-For each boundary check, additionally report its boundary-check ID, category, generated input or fixture reference, invariant, and observed result. A Validator that omits a declared boundary check cannot be accepted.
+For each boundary check, write a `validation_observations` record containing its check ID and dimension reference plus actual generated cases. Every case records `case_id`, partition, generated input or fixture reference, expected fact, observed fact, `passed`/`failed`, and evidence reference. Also write `coverage_gaps` as a factual array. An accepted or integrated Validator Run requires every declared check, every partition, the minimum number of cases, all cases passed, and an empty gap list.
 
 Route failures to the Coordinator. After repair, rerun affected self-checks, integration checks, and a targeted independent recheck. Mark the plan complete only when terminal deliverables and required Validator nodes are accepted.

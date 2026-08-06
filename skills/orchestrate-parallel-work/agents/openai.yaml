@@ -1,4 +1,4 @@
 interface:
   display_name: "Graph 任务编排"
-  short_description: "将复杂目标编译为可审批、可视化并独立验证的执行图"
-  default_prompt: "Use $orchestrate-parallel-work to compile this complex goal into an approval-gated task and artifact graph, show the local dashboard, and execute only the exact plan I approve."
+  short_description: "将复杂目标编译为可审批、可视化并独立验证的完整执行图"
+  default_prompt: "Use $orchestrate-parallel-work to choose the lightest safe orchestration profile, compile this complex goal into an approval-gated task and artifact graph, and execute only the exact plan I approve."

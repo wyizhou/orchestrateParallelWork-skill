@@ -2,6 +2,8 @@
 
 Read this reference before producing, validating, approving, or changing a Graph plan. The JSON Schemas under `assets/schemas/` and `scripts/graphctl.mjs` are authoritative for machine validation; this document defines their operating meaning.
 
+Contract schema `1.1` adds approval-bound execution profiles, declared boundary dimensions, and generated-case validation evidence. Treat `1.0` plans as immutable historical runs; do not silently rewrite or reapprove them as `1.1`.
+
 ## Separate plan from runtime state
 
 Use this run-directory layout so the compiler and Dashboard share one control plane:
@@ -45,9 +47,21 @@ Reject cycles, self-edges, unresolved references, incompatible ports, orphan Nod
 
 ## Compile Task and Artifact contracts
 
-Every Task freezes feature points, modules, authoritative inputs, owned and forbidden scopes, allowed external effects, constraints, completion criteria, output contracts, and both delivery gates. Validator Tasks additionally freeze conformance steps and non-empty factual boundary checks. Overlapping same-wave write or external-effect scopes require a dependency or plan rejection.
+Choose one approval-bound execution profile before compiling Nodes:
 
-The Artifact Catalog declares planned business outputs and validation evidence. Every contract has exactly one producer. A zero-consumer Artifact must be a declared terminal output or evidence output. Report total contracts together with separate delivery/evidence counts; before approval, actual Artifact count is zero.
+| Mode | Use | Required trimming / assurance |
+| --- | --- | --- |
+| `lightweight` | Low-risk work with at most four non-validation Nodes | One Validator; inline integration; one combined test/lint evidence Artifact per Node |
+| `standard` | Ordinary multi-unit work | Dedicated integration only for actual fan-in or an independent integration failure domain; combined or separate evidence as declared |
+| `assurance` | High-risk or multi-trust-boundary work | At least two Validator Nodes with separate `conformance` and `boundary` focuses |
+
+Do not use a heavier profile merely because capacity is available. Do not use `lightweight` to weaken either self-check gate: it only combines their evidence container and removes unnecessary Integration Nodes or intermediate Artifacts.
+
+Every non-Validator Task freezes feature points, modules, authoritative inputs, owned and forbidden scopes, allowed external effects, constraints, completion criteria, output contracts, both delivery gates, and one or more `boundary_dimensions`. A dimension declares its factual subject, category, named partitions, minimum generated case count, and sampling strategy. Precision and ordering require `adjacent-pair` or `exhaustive-declared` sampling so a broad label such as “timestamp ordering” cannot stand in for sub-millisecond or adjacent-value coverage.
+
+Validator Tasks additionally freeze conformance steps and factual boundary checks. Each check references an upstream dimension as `<task_id>:<dimension_id>` and must cover the same category, every declared partition, and at least the declared minimum case count. Overlapping same-wave write or external-effect scopes require a dependency or plan rejection.
+
+The Artifact Catalog declares planned business outputs and validation evidence. Every contract has exactly one producer. A zero-consumer Artifact must be a declared terminal output or evidence output. Report total contracts together with separate delivery/evidence counts; before approval, actual Artifact count is zero. In lightweight mode, both gate contracts reference the same evidence output; do not create separate empty wrappers. Do not create an intermediate business Artifact unless an Edge, terminal delivery, recovery boundary, or audit requirement consumes it.
 
 Runtime Artifact versions are immutable. Record the producer Node/run/attempt/Agent, relative URI, file list, digest, status, timestamps, and validation evidence. A retry creates a new version. A changed accepted input version/digest makes transitive dependent results stale.
 

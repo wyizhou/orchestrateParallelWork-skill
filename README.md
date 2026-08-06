@@ -11,12 +11,14 @@
 ## 主要优势
 
 - **DAG 原生表达三种执行方式**：依赖链形成串行，互不依赖的 Ready Nodes 形成并行，fan-out/fan-in 形成串并行。
+- **按风险选择编排档位**：低风险小图使用轻量模式，合并同一 Node 的测试/lint 证据并省略无必要的 Integration Node；普通任务使用标准模式；高风险任务自动要求合同一致性和边界探测两个独立 Validator。
 - **批准门不可绕过**：初始“请完成”不等于批准尚未生成的 Graph；任何实质契约变化都会使旧批准失效。
 - **实时 Graph Dashboard**：零 npm 运行依赖的 Node.js 服务固定监听 [`http://127.0.0.1:8088`](http://127.0.0.1:8088)，由独立生命周期控制器托管，可跨 Agent 回合存活；提供响应式 Graph、Tasks、Artifacts、Runs 和 Events 五个视图，以及 Node、Edge、Task、Artifact 和 Run 的结构化检查器。
 - **最终状态可靠交付**：运行结束时先发布最终 Revision，等待浏览器渲染确认并以5秒超时兜底，然后自动关闭本地 HTTP 服务；已打开页面保留最终 Graph，不会持续重连。
 - **动态容量而非盲目启动**：`effective_capacity = min(15, 平台容量, 权限容量)`，并把 Coordinator、Workers 和 Validators 全部计入。
 - **按能力跨平台适配**：通用核心不绑定某个 Agent API；Codex 和 Claude Code 由独立适配层映射指令、上下文、委派、权限和 worktree 机制。
 - **Node 交付有硬门**：每个 Node 默认必须提交业务 Artifact、测试证据和 lint 证据；预先批准的等价检查是唯一例外。
+- **可编译的边界覆盖**：Task 必须把精度、排序、溢出等风险拆成具名分区和最低样例数；Validator 必须覆盖全部分区，并记录每个实际生成样例的输入、expected/observed 与证据，避免只有“已覆盖”的空泛结论。
 - **事实型双层验证**：Validator 只接收功能点、模块、权威输入、Artifact 引用、一致性步骤和边界不变量，不接收实现者总结、论证或导向性结论；除合同复现外，还必须独立生成精度、溢出、排序、确定性或其他适用边界输入。
 - **区分交付与证据**：Dashboard 分开统计业务交付 Artifact 与测试/lint/Validator 证据，既保留完整血缘，也避免证据数量掩盖实际交付规模。
 - **可恢复和可审计**：不可变 Artifact 版本、Node Run Registry、批准记录与事件流共同保存完整血缘；上游变化会让下游结果显式 `stale`。
@@ -36,14 +38,14 @@
 
 ## 工作流程
 
-1. **编译计划**：冻结目标，规划 Agent Types、Nodes、Edges、Tasks、Artifacts、范围、验证门和终端产物。
+1. **选择档位并编译计划**：根据风险与规模选择轻量、标准或高保障模式，再冻结目标并规划 Agent Types、Nodes、Edges、Tasks、Artifacts、范围、验证门和终端产物。
 2. **静态验证**：拒绝循环、悬空引用、端口不匹配、重复生产者、同波次写入冲突和不完整验证门。
 3. **展示并等待**：输出角色、Node、Edge、Task、Artifact 数量和拓扑波次，启动 Dashboard，然后进入 `awaiting_user_approval`。
 4. **绑定批准**：只接受与当前 Plan ID、版本和 hash 匹配的明确批准。
 5. **动态调度**：在有效容量内释放依赖已接受、输入版本固定、范围不冲突的 Ready Nodes。
 6. **逐 Node 交付**：测试和 lint 证据通过后才能提交；Artifact 验收后才释放下游。
 7. **按图集成**：按拓扑顺序集成，持续同步 Registry、Events 与 Dashboard。
-8. **事实型终验**：由未参与实现的 Validator 分别执行合同一致性与边界/属性检查，通过后完成计划。
+8. **事实型终验**：由未参与实现的 Validator 执行合同一致性与边界/属性检查；每个边界分区必须留下实际生成样例，全部通过且没有覆盖缺口后才能完成计划。
 9. **同步并关闭**：最终状态原子落地后推送给 Dashboard；浏览器确认或超时后，本地 HTTP 服务自动关闭，运行目录继续保存完整结果。
 
 ## 文件
@@ -60,6 +62,8 @@
 - `skills/orchestrate-parallel-work/references/runtime-codex.md`：Codex 平台适配。
 - `skills/orchestrate-parallel-work/references/runtime-claude-code.md`：Claude Code 平台适配。
 - `skills/orchestrate-parallel-work/agents/openai.yaml`：可选的 Codex/OpenAI 界面元数据，不影响其他 Agent Skills 运行时读取 `SKILL.md`。
+
+当前 Graph Contract Schema 为 `1.1`。`1.0` 运行目录作为历史记录保留，不应原地改写为新版本；新计划使用 `1.1` 重新编译并获得新的批准 hash。
 
 ## 支持范围
 

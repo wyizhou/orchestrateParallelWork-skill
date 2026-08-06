@@ -32,7 +32,7 @@ const evidenceGate = (ref) => ({
 
 function taskBase(id, agentType, outputs) {
   return {
-    schema_version: "1.0",
+    schema_version: "1.1",
     task_id: id,
     node_id: id,
     goal: `Complete ${id}`,
@@ -47,6 +47,7 @@ function taskBase(id, agentType, outputs) {
     forbidden_scopes: [],
     allowed_external_effects: [],
     completion_criteria: ["All declared outputs conform"],
+    boundary_dimensions: [],
     self_validation: {
       test_gate: evidenceGate(`${id}-test`),
       lint_gate: evidenceGate(`${id}-lint`),
@@ -59,7 +60,7 @@ function artifact(id, producer, port, purpose, consumers = []) {
   return {
     artifact_contract_id: id,
     artifact_type: id.includes("lint") || id.includes("test") ? "check_result" : "json",
-    schema_version: "1.0",
+    schema_version: "1.1",
     purpose,
     producer: { node_id: producer, port },
     consumers,
@@ -81,6 +82,10 @@ function validBundle() {
   build.authoritative_inputs = ["request://original"];
   build.inputs = [{ port: "request", source: "external", cardinality: "one", required: true, authoritative_input_ref: "request://original" }];
   build.owned_scopes = ["src/core"];
+  build.boundary_dimensions = [{
+    id: "result-boundaries", category: "boundary", subject: "result contract",
+    partitions: ["valid-boundary", "invalid-neighbor"], minimum_cases: 2, sampling: "boundary-pair",
+  }];
 
   const validate = taskBase("validate", "validator", [
     { port: "report", artifact_contract_ref: "validation-report" },
@@ -90,21 +95,23 @@ function validBundle() {
   validate.inputs = [{ port: "candidate", source: "edge", cardinality: "one", required: true, artifact_contract_ref: "build-result" }];
   validate.validation_brief = {
     validation_id: "validate-core",
+    validation_focus: "combined",
     feature_points: [{ id: "FEATURE-1", expected_behavior: "A result is produced" }],
     modules: [{ name: "core", paths: ["src/core"] }],
     authoritative_input_refs: ["request://original"],
     artifact_refs: ["build-result"],
     verification_steps: ["Run declared checks and record observations"],
-    boundary_checks: [{ id: "BOUNDARY-1", category: "boundary", invariant: "Boundary inputs preserve the declared result contract", verification_steps: ["Exercise one valid boundary and one invalid neighbor"] }],
+    boundary_checks: [{ id: "BOUNDARY-1", category: "boundary", dimension_ref: "build:result-boundaries", partitions: ["valid-boundary", "invalid-neighbor"], minimum_cases: 2, invariant: "Boundary inputs preserve the declared result contract", verification_steps: ["Exercise one valid boundary and one invalid neighbor"] }],
   };
 
   return {
     graphPlan: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       plan_id: "plan-test",
       plan_version: 1,
       status: "awaiting_user_approval",
       goal_contract: { goal: "Produce and validate a result" },
+      execution_profile: { mode: "standard", risk_level: "medium", integration_strategy: "dedicated", evidence_strategy: "separate" },
       capacity: { hard_limit: 15, runtime_limit: 8, permission_limit: 3, effective_capacity: 3 },
       nodes: [
         { node_id: "build", node_type: "work", agent_type_id: "developer", task_ref: "build", input_ports: ["request"], output_ports: ["result", "test", "lint"] },
@@ -114,7 +121,7 @@ function validBundle() {
       terminal_outputs: ["validation-report"],
     },
     agentTypes: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       agent_types: [
         { agent_type_id: "developer", title: "Developer", purpose: "Build scoped output", capabilities: ["implementation"], allowed_tools: ["filesystem"], permission_profile: "project-write", default_owned_scopes: ["src/core"], max_instances: 2, validator: false },
         { agent_type_id: "validator", title: "Validator", purpose: "Observe declared facts", capabilities: ["validation"], allowed_tools: ["read", "test"], permission_profile: "read-only", default_owned_scopes: [], max_instances: 1, validator: true },
@@ -122,7 +129,7 @@ function validBundle() {
     },
     tasks: [build, validate],
     artifactCatalog: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       artifacts: [
         artifact("build-result", "build", "result", "intermediate", [{ node_id: "validate", port: "candidate" }]),
         artifact("build-test", "build", "test", "evidence"), artifact("build-lint", "build", "lint", "evidence"),
@@ -135,7 +142,7 @@ function validBundle() {
 
 function approved(bundle, hash = computePlanHash(bundle)) {
   return {
-    schema_version: "1.0", plan_id: bundle.graphPlan.plan_id, plan_version: bundle.graphPlan.plan_version,
+    schema_version: "1.1", plan_id: bundle.graphPlan.plan_id, plan_version: bundle.graphPlan.plan_version,
     plan_hash: hash, status: "approved", approved_by: "user", approved_at: "2026-01-01T00:00:00Z",
     approved_capacity: 3, approved_external_effects: [], approved_validation_exceptions: [],
   };
@@ -151,11 +158,13 @@ function hybridBundle() {
   docs.inputs = [{ port: "request", source: "external", cardinality: "one", required: true, authoritative_input_ref: "request://original" }];
   docs.authoritative_inputs = ["request://original"];
   docs.owned_scopes = ["docs"];
+  docs.boundary_dimensions = [{ id: "docs-repeatability", category: "determinism", subject: "documentation rendering", partitions: ["first-render", "repeat-render"], minimum_cases: 2, sampling: "representative" }];
   bundle.tasks.splice(1, 0, docs);
   bundle.graphPlan.nodes.splice(1, 0, { node_id: "docs", node_type: "work", agent_type_id: "developer", task_ref: "docs", input_ports: ["request"], output_ports: ["result", "test", "lint"] });
   bundle.graphPlan.nodes[2].input_ports.push("documentation");
   bundle.tasks[2].inputs.push({ port: "documentation", source: "edge", cardinality: "one", required: true, artifact_contract_ref: "docs-result" });
   bundle.tasks[2].validation_brief.artifact_refs.push("docs-result");
+  bundle.tasks[2].validation_brief.boundary_checks.push({ id: "DOCS-BOUNDARY", category: "determinism", dimension_ref: "docs:docs-repeatability", partitions: ["first-render", "repeat-render"], minimum_cases: 2, invariant: "Repeated documentation rendering is stable", verification_steps: ["Render twice and compare outputs"] });
   bundle.graphPlan.edges.push({ edge_id: "docs-to-validate", kind: "data", from: { node_id: "docs", port: "result" }, to: { node_id: "validate", port: "documentation" }, artifact_contract_ref: "docs-result" });
   bundle.artifactCatalog.artifacts.push(
     artifact("docs-result", "docs", "result", "intermediate", [{ node_id: "validate", port: "documentation" }]),
@@ -174,34 +183,36 @@ function parallelBundle() {
     ]);
     task.validation_brief = {
       validation_id: id,
+      validation_focus: "combined",
       feature_points: [],
       modules: [],
       authoritative_input_refs: ["request://original"],
       artifact_refs: [],
       verification_steps: ["Observe the assigned external facts"],
-      boundary_checks: [{ id: `${id}-boundary`, category: "determinism", invariant: "Repeated observations are stable", verification_steps: ["Repeat the observation twice and compare raw results"] }],
+      boundary_checks: [{ id: `${id}-boundary`, category: "determinism", dimension_ref: `external:${id}-repeatability`, partitions: ["first-observation", "repeat-observation"], minimum_cases: 2, invariant: "Repeated observations are stable", verification_steps: ["Repeat the observation twice and compare raw results"] }],
     };
     return task;
   };
   const tasks = [makeValidator("validate-left"), makeValidator("validate-right")];
   return {
     graphPlan: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       plan_id: "plan-parallel",
       plan_version: 1,
       status: "awaiting_user_approval",
+      execution_profile: { mode: "standard", risk_level: "medium", integration_strategy: "dedicated", evidence_strategy: "separate" },
       capacity: { hard_limit: 15, runtime_limit: 6, permission_limit: 6, effective_capacity: 6 },
       nodes: tasks.map((task) => ({ node_id: task.node_id, node_type: "validation", agent_type_id: "validator", task_ref: task.task_id, input_ports: [], output_ports: ["report", "test", "lint"] })),
       edges: [],
       terminal_outputs: tasks.map((task) => `${task.task_id}-report`),
     },
     agentTypes: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       agent_types: [{ agent_type_id: "validator", title: "Validator", purpose: "Observe declared facts", capabilities: ["validation"], allowed_tools: ["read", "test"], permission_profile: "read-only", default_owned_scopes: [], max_instances: 2, validator: true }],
     },
     tasks,
     artifactCatalog: {
-      schema_version: "1.0",
+      schema_version: "1.1",
       artifacts: tasks.flatMap((task) => [
         artifact(`${task.task_id}-report`, task.task_id, "report", "delivery"),
         artifact(`${task.task_id}-test`, task.task_id, "test", "evidence"),
@@ -217,7 +228,7 @@ test("compiler accepts a complete approval-gated serial DAG and derives counts",
   assert.deepEqual(compiled.topology.waves, [["build"], ["validate"]]);
   assert.deepEqual(compiled.summary, {
     agent_role_count: 2, node_count: 2, edge_count: 1, task_count: 2,
-    planned_artifact_count: 6, estimated_peak_agents: 2, execution_shape: "serial",
+    planned_artifact_count: 6, estimated_peak_agents: 2, execution_shape: "serial", orchestration_profile: "standard",
   });
   assert.match(compiled.hash, /^sha256:[0-9a-f]{64}$/);
 });
@@ -266,7 +277,7 @@ test("scheduler rechecks approval and capacity when activating a node", () => {
   const compiled = compileBundle(bundle);
   const state = createExecutionState(compiled);
   const approval = approved(bundle, compiled.hash);
-  const registry = { schema_version: "1.0", execution_run_id: state.execution_run_id, coordinator_agent_instance_id: "coordinator", entries: [] };
+  const registry = { schema_version: "1.1", execution_run_id: state.execution_run_id, coordinator_agent_instance_id: "coordinator", entries: [] };
   assert.deepEqual(markReadyNodes(compiled, state, approval), ["build"]);
   assert.throws(() => activateNode(compiled, state, { ...approval, status: "revoked" }, registry, "build", "worker-1"), /approval/);
   const entry = activateNode(compiled, state, approval, registry, "build", "worker-1");
@@ -319,10 +330,77 @@ test("validator brief requires reproducible boundary coverage", () => {
   assert(validateBundle(empty).errors.some((item) => item.code === "boundary_coverage"));
 
   const invalid = validBundle();
-  invalid.tasks[1].validation_brief.boundary_checks = [{ id: "edge", category: "conclusion", invariant: "The result is correct", verification_steps: [] }];
+  invalid.tasks[1].validation_brief.boundary_checks = [{ id: "edge", category: "conclusion", dimension_ref: "build:result-boundaries", partitions: [], minimum_cases: 0, invariant: "The result is correct", verification_steps: [] }];
   const result = validateBundle(invalid);
   assert(result.errors.some((item) => item.code === "enum"));
   assert(result.errors.some((item) => item.path.endsWith("verification_steps")));
+});
+
+test("compiler requires validator checks to cover declared partitions and case counts", () => {
+  const missingPartition = validBundle();
+  missingPartition.tasks[1].validation_brief.boundary_checks[0].partitions = ["valid-boundary"];
+  missingPartition.tasks[1].validation_brief.boundary_checks[0].minimum_cases = 1;
+  assert(validateBundle(missingPartition).errors.some((item) => item.code === "validator_coverage"));
+
+  const weakPrecision = validBundle();
+  weakPrecision.tasks[0].boundary_dimensions[0] = {
+    id: "timestamp-precision", category: "precision", subject: "timestamp ordering precision",
+    partitions: ["whole-second", "millisecond", "sub-millisecond", "adjacent-representable"], minimum_cases: 4, sampling: "representative",
+  };
+  weakPrecision.tasks[1].validation_brief.boundary_checks[0] = {
+    id: "TIMESTAMP-PRECISION", category: "precision", dimension_ref: "build:timestamp-precision",
+    partitions: ["whole-second", "millisecond", "sub-millisecond", "adjacent-representable"], minimum_cases: 4,
+    invariant: "Timestamp ordering preserves every declared precision partition", verification_steps: ["Generate independent adjacent values for each partition"],
+  };
+  assert(validateBundle(weakPrecision).errors.some((item) => item.code === "boundary_coverage" && item.path.endsWith("sampling")));
+  weakPrecision.tasks[0].boundary_dimensions[0].sampling = "adjacent-pair";
+  assert.equal(validateBundle(weakPrecision).valid, true);
+});
+
+test("execution profiles enforce lightweight trimming and high-risk assurance", () => {
+  const lightweight = validBundle();
+  lightweight.graphPlan.execution_profile = { mode: "lightweight", risk_level: "low", integration_strategy: "inline", evidence_strategy: "combined" };
+  for (const task of lightweight.tasks) {
+    task.self_validation.lint_gate.evidence_contract_ref = task.self_validation.test_gate.evidence_contract_ref;
+    task.outputs = task.outputs.filter((output) => !output.artifact_contract_ref.endsWith("-lint"));
+    const node = lightweight.graphPlan.nodes.find((item) => item.node_id === task.node_id);
+    node.output_ports = node.output_ports.filter((port) => port !== "lint");
+  }
+  lightweight.artifactCatalog.artifacts = lightweight.artifactCatalog.artifacts.filter((item) => !item.artifact_contract_id.endsWith("-lint"));
+  assert.equal(validateBundle(lightweight).valid, true);
+  assert.equal(compileBundle(lightweight).summary.planned_artifact_count, 4);
+
+  const highRisk = validBundle();
+  highRisk.graphPlan.execution_profile.risk_level = "high";
+  const result = validateBundle(highRisk);
+  assert(result.errors.some((item) => item.code === "profile" && item.message.includes("assurance")));
+  assert(result.errors.some((item) => item.code === "profile" && item.message.includes("two independent")));
+});
+
+test("accepted validator runs require factual generated cases for every partition", () => {
+  const bundle = validBundle();
+  const compiled = compileBundle(bundle);
+  const baseRun = {
+    node_run_id: "validate-a1", node_id: "validate", attempt: 1, agent_instance_id: "validator-1",
+    agent_type_id: "validator", status: "accepted", input_artifacts: [], output_artifacts: [], self_checks: [],
+  };
+  let result = validateRuntimeRegistries(compiled, { artifacts: [] }, { coordinator_agent_instance_id: "coordinator", entries: [baseRun] });
+  assert(result.errors.some((item) => item.code === "validation_evidence"));
+
+  baseRun.coverage_gaps = [];
+  baseRun.validation_observations = [{
+    boundary_check_id: "BOUNDARY-1", dimension_ref: "build:result-boundaries", cases: [
+      { case_id: "case-valid", partition: "valid-boundary", generated_input_or_fixture_ref: "fixture://valid", expected_fact: "accepted", observed_fact: "accepted", status: "passed", evidence_ref: "evidence://valid" },
+      { case_id: "case-invalid", partition: "invalid-neighbor", generated_input_or_fixture_ref: "fixture://invalid", expected_fact: "rejected", observed_fact: "rejected", status: "passed", evidence_ref: "evidence://invalid" },
+    ],
+  }];
+  result = validateRuntimeRegistries(compiled, { artifacts: [] }, { coordinator_agent_instance_id: "coordinator", entries: [baseRun] });
+  assert.equal(result.valid, true);
+  baseRun.coverage_gaps = ["invalid-neighbor behavior could not be observed"];
+  assert(validateRuntimeRegistries(compiled, { artifacts: [] }, { coordinator_agent_instance_id: "coordinator", entries: [baseRun] }).errors.some((item) => item.path.endsWith("coverage_gaps")));
+  baseRun.coverage_gaps = [];
+  baseRun.validation_observations[0].cases[1].status = "failed";
+  assert(validateRuntimeRegistries(compiled, { artifacts: [] }, { coordinator_agent_instance_id: "coordinator", entries: [baseRun] }).errors.some((item) => item.message.includes("every generated case")));
 });
 
 test("every node requires test and lint gates with evidence", () => {

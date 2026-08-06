@@ -3,14 +3,25 @@
   "$id": "https://orchestrate-parallel-work.local/schemas/graph-plan.schema.json",
   "title": "Graph Plan v1",
   "type": "object",
-  "required": ["schema_version", "plan_id", "plan_version", "status", "capacity", "nodes", "edges", "terminal_outputs"],
+  "required": ["schema_version", "plan_id", "plan_version", "status", "execution_profile", "capacity", "nodes", "edges", "terminal_outputs"],
   "properties": {
-    "schema_version": { "const": "1.0" },
+    "schema_version": { "const": "1.1" },
     "plan_id": { "type": "string", "minLength": 1 },
     "plan_version": { "type": "integer", "minimum": 1 },
     "plan_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "status": { "enum": ["draft", "graph_validated", "awaiting_user_approval", "approved", "running", "validating", "completed", "rejected", "revision_requested", "revoked", "failed", "cancelled", "superseded"] },
     "goal_contract": { "type": "object" },
+    "execution_profile": {
+      "type": "object",
+      "required": ["mode", "risk_level", "integration_strategy", "evidence_strategy"],
+      "properties": {
+        "mode": { "enum": ["lightweight", "standard", "assurance"] },
+        "risk_level": { "enum": ["low", "medium", "high"] },
+        "integration_strategy": { "enum": ["inline", "dedicated"] },
+        "evidence_strategy": { "enum": ["combined", "separate"] }
+      },
+      "additionalProperties": false
+    },
     "capacity": {
       "type": "object",
       "required": ["hard_limit", "runtime_limit", "permission_limit", "effective_capacity"],
@@ -67,12 +78,13 @@
     },
     "summary": {
       "type": "object",
-      "required": ["agent_role_count", "node_count", "edge_count", "task_count", "planned_artifact_count", "estimated_peak_agents", "execution_shape"],
+      "required": ["agent_role_count", "node_count", "edge_count", "task_count", "planned_artifact_count", "estimated_peak_agents", "execution_shape", "orchestration_profile"],
       "properties": {
         "agent_role_count": { "type": "integer", "minimum": 1 }, "node_count": { "type": "integer", "minimum": 1 },
         "edge_count": { "type": "integer", "minimum": 0 }, "task_count": { "type": "integer", "minimum": 1 },
         "planned_artifact_count": { "type": "integer", "minimum": 1 }, "estimated_peak_agents": { "type": "integer", "minimum": 1, "maximum": 15 },
-        "execution_shape": { "enum": ["serial", "parallel", "hybrid"] }
+        "execution_shape": { "enum": ["serial", "parallel", "hybrid"] },
+        "orchestration_profile": { "enum": ["lightweight", "standard", "assurance"] }
       },
       "additionalProperties": false
     }

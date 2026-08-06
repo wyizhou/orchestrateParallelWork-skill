@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://orchestrate-parallel-work.local/schemas/node-run-registry.schema.json", "title": "Node Run Registry v1",
   "type": "object", "required": ["schema_version", "execution_run_id", "coordinator_agent_instance_id", "entries"],
   "properties": {
-    "schema_version": { "const": "1.0" }, "execution_run_id": { "type": "string", "minLength": 1 }, "coordinator_agent_instance_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "const": "1.1" }, "execution_run_id": { "type": "string", "minLength": 1 }, "coordinator_agent_instance_id": { "type": "string", "minLength": 1 },
     "entries": { "type": "array", "items": { "type": "object", "required": ["node_run_id", "node_id", "attempt", "agent_instance_id", "agent_type_id", "status", "input_artifacts", "output_artifacts", "self_checks"],
       "properties": {
         "node_run_id": { "type": "string", "minLength": 1 }, "node_id": { "type": "string", "minLength": 1 }, "attempt": { "type": "integer", "minimum": 1 },
@@ -11,8 +11,14 @@
         "input_artifacts": { "type": "array" }, "output_artifacts": { "type": "array", "items": { "type": "string" } },
         "started_at": { "type": "string", "format": "date-time" }, "ended_at": { "type": "string", "format": "date-time" },
         "self_checks": { "type": "array", "items": { "type": "object", "required": ["gate", "status", "step", "evidence_ref"], "properties": { "gate": { "enum": ["test_gate", "lint_gate"] }, "status": { "enum": ["passed", "failed"] }, "step": { "type": "string" }, "exit_code": { "type": "integer" }, "evidence_ref": { "type": "string" } }, "additionalProperties": false },
+        "validation_observations": { "type": "array", "items": { "$ref": "#/$defs/validationObservation" } },
+        "coverage_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "failure": { "type": "object" }
       }, "additionalProperties": false } }
     }
+  },
+  "$defs": {
+    "validationObservation": { "type": "object", "required": ["boundary_check_id", "dimension_ref", "cases"], "properties": { "boundary_check_id": { "type": "string", "minLength": 1 }, "dimension_ref": { "type": "string", "minLength": 1 }, "cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/generatedCase" } } }, "additionalProperties": false },
+    "generatedCase": { "type": "object", "required": ["case_id", "partition", "generated_input_or_fixture_ref", "expected_fact", "observed_fact", "status", "evidence_ref"], "properties": { "case_id": { "type": "string", "minLength": 1 }, "partition": { "type": "string", "minLength": 1 }, "generated_input_or_fixture_ref": { "type": "string", "minLength": 1 }, "expected_fact": { "type": "string", "minLength": 1 }, "observed_fact": { "type": "string", "minLength": 1 }, "status": { "enum": ["passed", "failed"] }, "evidence_ref": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
   }, "additionalProperties": false
 }
