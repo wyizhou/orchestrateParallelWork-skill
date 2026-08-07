@@ -27,7 +27,7 @@ description: 把复杂目标编译为可审批、可追踪的 DAG，使用类型
 
 ## 2. Compile the graph plan
 
-在编排前读取 [Graph、Task、Artifact 与运行状态契约](references/graph-contracts.md)、[任务交付门与事实型独立验证](references/validation.md)，以及适用的运行时适配。
+在编排前读取 [Graph、Task、Artifact 与运行状态契约](references/graph-contracts.md)、[任务交付门与事实型独立验证](references/validation.md)，以及适用的运行时适配。选择执行档位或首次编译因档位、证据、边界字段失败时，读取 [三档执行与契约片段](references/profile-examples.md)；只借用字段结构，不照搬任务拆解或具体分区。
 
 由顶层 Planner/Coordinator：
 

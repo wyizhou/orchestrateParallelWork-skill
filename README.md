@@ -1,85 +1,51 @@
 # orchestrate-parallel-work
 
-一个基于 Graph Engineering 的 Agent Skill：把复杂目标编译为可审批的 DAG，用类型化 Task 与 Artifact 契约执行串行、并行或串并行工作，并通过本地实时 Dashboard 展示全过程。
+[![Validate skill package](https://github.com/wyizhou/orchestrateParallelWork-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/wyizhou/orchestrateParallelWork-skill/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js >= 18](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-6f42c1)](https://agentskills.io/specification)
 
-## 核心亮点
+一个面向复杂任务的 Graph Engineering Agent Skill。它先把目标编译成可审批的 Agent、Node、Edge、Task 与 Artifact 执行图，再按依赖关系完成串行、并行或串并行调度。
 
-> **先看清整张执行图，再决定是否开始。**
->
-> Planner 会先生成 Agent Types、Nodes、Edges、Task Contracts 和 Artifact Contracts，验证 Graph 后输出数量、拓扑波次和深色 Dashboard。只有用户明确批准具体的 Plan ID、版本和 hash，执行才会开始。
+执行过程中，本地 Web Dashboard 会实时展示 Graph、任务、产物、Agent Runs 和事件。最终交付必须经过每个 Node 的测试/lint 门以及不参与实现的事实型 Validator。
 
-## 主要优势
+## 核心思想
 
-- **DAG 原生表达三种执行方式**：依赖链形成串行，互不依赖的 Ready Nodes 形成并行，fan-out/fan-in 形成串并行。
-- **按风险选择编排档位**：低风险小图使用轻量模式，合并同一 Node 的测试/lint 证据并省略无必要的 Integration Node；普通任务使用标准模式；高风险任务自动要求合同一致性和边界探测两个独立 Validator。
-- **批准门不可绕过**：初始“请完成”不等于批准尚未生成的 Graph；任何实质契约变化都会使旧批准失效。
-- **实时 Graph Dashboard**：零 npm 运行依赖的 Node.js 服务固定监听 [`http://127.0.0.1:8088`](http://127.0.0.1:8088)，由独立生命周期控制器托管，可跨 Agent 回合存活；提供响应式 Graph、Tasks、Artifacts、Runs 和 Events 五个视图，以及 Node、Edge、Task、Artifact 和 Run 的结构化检查器。
-- **最终状态可靠交付**：运行结束时先发布最终 Revision，等待浏览器渲染确认并以5秒超时兜底，然后自动关闭本地 HTTP 服务；已打开页面保留最终 Graph，不会持续重连。
-- **动态容量而非盲目启动**：`effective_capacity = min(15, 平台容量, 权限容量)`，并把 Coordinator、Workers 和 Validators 全部计入。
-- **按能力跨平台适配**：通用核心不绑定某个 Agent API；Codex 和 Claude Code 由独立适配层映射指令、上下文、委派、权限和 worktree 机制。
-- **Node 交付有硬门**：每个 Node 默认必须提交业务 Artifact、测试证据和 lint 证据；预先批准的等价检查是唯一例外。
-- **可编译的边界覆盖**：Task 必须把精度、排序、溢出等风险拆成具名分区和最低样例数；Validator 必须覆盖全部分区，并记录每个实际生成样例的输入、expected/observed 与证据，避免只有“已覆盖”的空泛结论。
-- **事实型双层验证**：Validator 只接收功能点、模块、权威输入、Artifact 引用、一致性步骤和边界不变量，不接收实现者总结、论证或导向性结论；除合同复现外，还必须独立生成精度、溢出、排序、确定性或其他适用边界输入。
-- **区分交付与证据**：Dashboard 分开统计业务交付 Artifact 与测试/lint/Validator 证据，既保留完整血缘，也避免证据数量掩盖实际交付规模。
-- **可恢复和可审计**：不可变 Artifact 版本、Node Run Registry、批准记录与事件流共同保存完整血缘；上游变化会让下游结果显式 `stale`。
+> **先看清执行图，再决定是否开始；先固定输入输出，再释放下游。**
+
+```mermaid
+flowchart LR
+  Goal[输入目标] --> Plan[Planner 编译 Graph]
+  Plan --> Approve{用户批准<br/>Plan ID + Version + Hash}
+  Approve -->|批准| Ready[按依赖释放 Ready Nodes]
+  Ready --> Parallel[串行 / 并行 / 串并行执行]
+  Parallel --> Artifacts[注册不可变 Artifacts]
+  Artifacts --> Validate[事实型独立验证]
+  Validate --> Done[同步最终状态并交付]
+```
+
+- **依赖决定并行**：只有输入稳定、写入面互不冲突的 Node 才会同时运行。
+- **批准绑定内容**：Graph、Task、Artifact、范围或验证契约变化都会产生新 hash，并使旧批准失效；批准前状态为 `awaiting_user_approval`。
+- **动态容量**：`effective_capacity = min(15, 平台实际容量, 当前权限容量)`。
+- **按风险选择档位**：低风险小图使用轻量模式，一般复杂任务使用标准模式，高风险任务使用双 Validator 高保障模式。
+- **可编译的边界覆盖**：精度、排序、溢出等风险必须拆成具名分区和最低样例数；Validator 必须留下实际生成样例和 observed evidence。
+- **可恢复、可审计**：Artifact 版本、digest、Node attempt、批准记录和事件流共同保存完整血缘。
 
 ## 能做什么
 
-适合包含多个依赖、写入面、专业角色或验收环节的复杂目标，例如：
+- 多模块软件开发、重构、迁移与跨组件集成。
+- 多 Agent、分支、worktree 或独立上下文协作。
+- 大型研究、多来源资料核验和报告交付。
+- 数据分析、多指标计算与口径复算。
+- 需要分阶段执行、失败恢复和独立验收的复杂项目。
 
-- 多模块软件开发、重构、迁移和跨组件集成。
-- 多 Agent 协作，以及需要分支、worktree 或独立工作流隔离的任务。
-- 大型研究、资料核验和多来源证据整理。
-- 数据分析、多指标计算和跨口径复算。
-- 多章节报告、文档、内容生产与统一编辑。
-- 需要分阶段交付、集成检查和最终验收的项目。
-
-它会把复杂目标转换成边界清楚、依赖明确、互不冲突且可以独立验证的执行图，先交给用户审阅，再把已批准的图变成经过统一检查的完整成果。
-
-## 工作流程
-
-1. **选择档位并编译计划**：根据风险与规模选择轻量、标准或高保障模式，再冻结目标并规划 Agent Types、Nodes、Edges、Tasks、Artifacts、范围、验证门和终端产物。
-2. **静态验证**：拒绝循环、悬空引用、端口不匹配、重复生产者、同波次写入冲突和不完整验证门。
-3. **展示并等待**：输出角色、Node、Edge、Task、Artifact 数量和拓扑波次，启动 Dashboard，然后进入 `awaiting_user_approval`。
-4. **绑定批准**：只接受与当前 Plan ID、版本和 hash 匹配的明确批准。
-5. **动态调度**：在有效容量内释放依赖已接受、输入版本固定、范围不冲突的 Ready Nodes。
-6. **逐 Node 交付**：测试和 lint 证据通过后才能提交；Artifact 验收后才释放下游。
-7. **按图集成**：按拓扑顺序集成，持续同步 Registry、Events 与 Dashboard。
-8. **事实型终验**：由未参与实现的 Validator 执行合同一致性与边界/属性检查；每个边界分区必须留下实际生成样例，全部通过且没有覆盖缺口后才能完成计划。
-9. **同步并关闭**：最终状态原子落地后推送给 Dashboard；浏览器确认或超时后，本地 HTTP 服务自动关闭，运行目录继续保存完整结果。
-
-## 文件
-
-- `skills/orchestrate-parallel-work/SKILL.md`：完整的 Skill 定义和执行规范。
-- `skills/orchestrate-parallel-work/assets/schemas/`：Graph、Task、Artifact、批准与运行状态的 JSON Schemas。
-- `skills/orchestrate-parallel-work/scripts/graphctl.mjs`：零依赖 Graph 编译与控制面工具。
-- `skills/orchestrate-parallel-work/scripts/dashboardctl.mjs`：Dashboard 后台启动、身份/健康检查和停止工具。
-- `skills/orchestrate-parallel-work/scripts/dashboard-server.mjs`：只读 localhost Dashboard 服务。
-- `skills/orchestrate-parallel-work/assets/dashboard/`：深色 SVG Graph 前端资源。
-- `skills/orchestrate-parallel-work/references/graph-contracts.md`：Graph Engineering 契约与调度规则。
-- `skills/orchestrate-parallel-work/references/dashboard.md`：Dashboard 启动、同步和状态说明。
-- `skills/orchestrate-parallel-work/references/runtime-generic.md`：通用能力发现、上下文、权限和隔离规则。
-- `skills/orchestrate-parallel-work/references/runtime-codex.md`：Codex 平台适配。
-- `skills/orchestrate-parallel-work/references/runtime-claude-code.md`：Claude Code 平台适配。
-- `skills/orchestrate-parallel-work/agents/openai.yaml`：可选的 Codex/OpenAI 界面元数据，不影响其他 Agent Skills 运行时读取 `SKILL.md`。
-
-当前 Graph Contract Schema 为 `1.1`。`1.0` 运行目录作为历史记录保留，不应原地改写为新版本；新计划使用 `1.1` 重新编译并获得新的批准 hash。
-
-## 支持范围
-
-本项目基于 [Agent Skills 开放标准](https://agentskills.io/specification)：
-
-- **Codex**：提供专用运行时适配。
-- **Claude Code**：提供专用运行时适配，并验证 `skills` CLI 的安装和载荷结构。
-- **其他 Agent Skills 运行时**：使用通用核心；缺少已验证的委派或隔离能力时安全降级为串行。
+小而明确、只有一个产物和单一写入面的任务不会为了并行而强制使用本 Skill。
 
 ## 安装
 
-需要可用的 Node.js 和 `npx` 环境。Dashboard 使用 Node.js 内置模块，不需要额外执行 `npm install`。以下命令始终从仓库的 `main` 分支安装当前版本，不绑定 CLI 或 Skill 的版本号。
+需要 Node.js 与 `npx`。安装命令始终读取仓库 `main` 的当前内容，不绑定 CLI 或 Skill 版本。
 
 ### 全局安装
-
-将 skill 同时安装到当前用户的 Codex 和 Claude Code skills 目录：
 
 ```bash
 npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex claude-code --global --yes
@@ -87,15 +53,16 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 
 ### 项目安装
 
-将 skill 安装到当前项目的 Agent skills 目录：
-
 ```bash
 npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/tree/main/skills/orchestrate-parallel-work" --agent codex claude-code --yes
 ```
 
 ### 给 AI 的安装 Prompt
 
-将下面英文 Prompt 原样交给 AI。它会先比较已安装内容与远端 `main` 的当前内容：未安装时执行安装，内容不一致时才更新，完全一致时不做改动。
+把下面 Prompt 交给当前 Codex 或 Claude Code。它会先下载远端载荷做递归比较，只在未安装或内容不一致时安装，并且不会修改无关 Skills。
+
+<details>
+<summary>展开完整 Prompt</summary>
 
 ```text
 Install or update the `orchestrate-parallel-work` skill globally for the AI coding agent hosting this conversation. Supported target IDs are `codex` for Codex and `claude-code` for Claude Code. Determine which of those two hosts is currently running and select exactly one matching target ID. If the host is neither one, stop and report that no tested installer target is available. Use the current `main` branch and do not pin either the `skills` CLI or the skill to a version. Do not install it for any other agent, and do not modify, remove, update, or reinstall unrelated skills.
@@ -116,13 +83,60 @@ npx --yes skills add "https://github.com/wyizhou/orchestrateParallelWork-skill/t
 
 If the skill is already installed, recursively compare the installed directory reported by `skills list` with the downloaded upstream payload. Compare file paths and file contents. If they are identical, do not reinstall or update anything. If they differ, run the same exact `skills add` command above to replace only `orchestrate-parallel-work`. Do not use `skills update`; the explicit `add` command also handles installations created with older repository layouts.
 
-After an installation or update, run `npx --yes skills list --global --agent <agent-id> --json` again and recursively compare the installed directory with the downloaded upstream payload. Confirm that there are no differences and that the installed copy contains `SKILL.md`, `scripts/graphctl.mjs`, `scripts/dashboardctl.mjs`, `scripts/dashboard-server.mjs`, `assets/schemas/graph-plan.schema.json`, `assets/dashboard/index.html`, `assets/dashboard/fonts/NotoSansSC-UI.woff2`, `references/graph-contracts.md`, `references/dashboard.md`, `references/runtime-generic.md`, `references/runtime-codex.md`, `references/runtime-claude-code.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`.
+After an installation or update, run `npx --yes skills list --global --agent <agent-id> --json` again and recursively compare the installed directory with the downloaded upstream payload. Confirm that there are no differences and that the installed copy contains `SKILL.md`, `scripts/graphctl.mjs`, `scripts/dashboardctl.mjs`, `scripts/dashboard-server.mjs`, `assets/schemas/graph-plan.schema.json`, `assets/dashboard/index.html`, `assets/dashboard/fonts/NotoSansSC-UI.woff2`, `references/graph-contracts.md`, `references/profile-examples.md`, `references/dashboard.md`, `references/runtime-generic.md`, `references/runtime-codex.md`, `references/runtime-claude-code.md`, and `references/validation.md`. Read the installed `SKILL.md` frontmatter and confirm that its name is `orchestrate-parallel-work`.
 
 Do not run, invoke, or otherwise execute the orchestration skill. Report whether the result was a new installation, an update caused by differing content, or no change because the content already matched. Include the installation path and verification result.
 ```
 
+</details>
+
+## Web Dashboard
+
+计划编译通过后，Skill 会启动一个只读 Node.js HTTP 服务：
+
+```text
+http://127.0.0.1:8088
+```
+
+它只监听本机回环地址，不对局域网或公网开放，也不计入 Agent 容量。页面提供：
+
+- **Graph**：完整 Nodes、Edges、拓扑波次和活动 Edge 动画。
+- **Tasks**：目标、范围、输入输出、测试/lint 门和边界维度。
+- **Artifacts**：计划契约、实际版本、路径、digest 与生产/消费关系。
+- **Runs**：Agent Instance、attempt、状态、自检和独立验证样例。
+- **Events**：追加式事实事件与运行 revision。
+
+### 生命周期
+
+1. 批准前启动 Dashboard，让用户查看完整 Graph。
+2. 执行时通过落地状态、SSE 和恢复轮询持续同步。
+3. 运行结束时先写入所有最终 Task、Artifact、Run 与事件。
+4. 最后发布终态 revision，等待浏览器完成最终渲染。
+5. 浏览器确认或5秒超时后，HTTP 服务自动关闭；已打开页面保留最终画面。
+
+如果状态文件短暂不可读，Dashboard 会保留最后一个有效 Snapshot 并显示 degraded。终态运行目录可以之后重新启动页面进行只读复查。
+
+## 支持范围
+
+- **Codex**：专用运行时适配。
+- **Claude Code**：专用运行时适配。
+- **其他 Agent Skills 运行时**：使用通用能力发现；无法确认委派或隔离能力时安全降级为串行。
+
+核心逻辑不绑定具体模型名称或推理等级。
+
+## 技术文档
+
+实现细节集中在 [技术架构](docs/architecture.md)，包括：
+
+- Graph Contract Schema 1.1 与三档执行策略。
+- Task、Artifact、Registry 和批准 hash。
+- DAG 调度、容量、失效传播与恢复。
+- 事实型 Validator 与边界样例证据。
+- Dashboard 数据源、实时同步及关闭协议。
+- 平台适配与验证入口。
+
+Skill 执行所需的精确规则仍位于 [`skills/orchestrate-parallel-work`](skills/orchestrate-parallel-work) 内，仓库 README 和架构文档不作为运行时指令替代品。
+
 ## 许可证
 
-本项目采用 [MIT License](LICENSE)。
-
-Dashboard 内置的 Noto Sans SC 字体子集采用 [SIL Open Font License 1.1](skills/orchestrate-parallel-work/assets/dashboard/fonts/OFL.txt)。
+项目采用 [MIT License](LICENSE)。Dashboard 内置的 Noto Sans SC 字体子集采用 [SIL Open Font License 1.1](skills/orchestrate-parallel-work/assets/dashboard/fonts/OFL.txt)。

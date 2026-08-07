@@ -32,6 +32,7 @@ SCHEMAS = (
 
 REQUIRED = (
     README,
+    ROOT / "docs" / "architecture.md",
     SKILL_MD,
     OPENAI,
     SKILL / "LICENSE",
@@ -48,6 +49,7 @@ REQUIRED = (
     SKILL / "assets" / "dashboard" / "fonts" / "NotoSansSC-UI.woff2",
     SKILL / "assets" / "dashboard" / "fonts" / "OFL.txt",
     SKILL / "references" / "graph-contracts.md",
+    SKILL / "references" / "profile-examples.md",
     SKILL / "references" / "dashboard.md",
     SKILL / "references" / "runtime-generic.md",
     SKILL / "references" / "runtime-codex.md",
@@ -72,11 +74,16 @@ CASE_IDS = {
     "approved-equivalent-check",
     "fact-only-validator-input",
     "validator-boundary-coverage",
+    "lightweight-profile-trims-control-plane",
+    "high-risk-profile-splits-validators",
+    "boundary-dimensions-map-exactly",
+    "accepted-validator-records-generated-cases",
     "validator-independent-read-only",
     "artifact-version-stales-descendants",
     "dashboard-loopback-read-only",
     "dashboard-state-from-files",
     "dashboard-survives-agent-turn",
+    "dashboard-terminal-sync-then-close",
     "platform-rules-win",
 }
 
@@ -143,7 +150,7 @@ def validate_readme(text: str, errors: list[str]) -> None:
         "README",
         errors,
     )
-    installation = re.search(r"^## 安装\n(.*?)^## 许可证\n", text, re.MULTILINE | re.DOTALL)
+    installation = re.search(r"^## 安装\n(.*?)(?=^## )", text, re.MULTILINE | re.DOTALL)
     if not installation:
         errors.append("README must contain installation and license sections")
         return
@@ -237,13 +244,13 @@ def main() -> int:
     validate_readme(readme, errors)
     validate_cases(errors)
     validate_schemas(errors)
-    require(skill, ("awaiting_user_approval", "plan_hash", "effective_capacity = min(15", "graphctl.mjs", "dashboard-server.mjs", "Validator"), "SKILL.md", errors)
+    require(skill, ("awaiting_user_approval", "plan_hash", "effective_capacity = min(15", "graphctl.mjs", "dashboard-server.mjs", "profile-examples.md", "Validator"), "SKILL.md", errors)
     for literal in ("AGENTS.md", "CLAUDE.md", "fork_turns", "isolation: worktree"):
         if literal in f"{skill}\n{generic}":
             errors.append(f"generic core contains platform-specific literal: {literal}")
     require(codex, ("AGENTS.md", "fork_turns", "runtime-generic.md"), "Codex adapter", errors)
     require(claude, ("CLAUDE.md", "Agent tool", "isolation: worktree", "runtime-generic.md"), "Claude adapter", errors)
-    require(validation, ("test gate", "lint gate", "fact-only", "Expected fact", "Observed fact"), "validation reference", errors)
+    require(validation, ("test gate", "lint gate", "fact-only", "Expected fact", "Observed fact", "boundary_dimensions", "validation_observations"), "validation reference", errors)
     require(graph_core, ("HARD_AGENT_LIMIT = 15", "computePlanHash", "validateBundle", "validateValidatorBrief", "readyNodeIds"), "graph-core.mjs", errors)
     require(dashboard_server, ('const HOST = "127.0.0.1"', "const DEFAULT_PORT = 8088", "GET", "HEAD", "text/event-stream"), "dashboard-server.mjs", errors)
     require(dashboard_css, ("prefers-reduced-motion", "stroke-dasharray", "stroke-dashoffset", "@keyframes producing", "@keyframes flowing", "@keyframes nodePulse"), "Dashboard CSS", errors)
