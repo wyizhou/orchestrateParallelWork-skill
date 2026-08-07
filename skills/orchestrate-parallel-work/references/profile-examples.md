@@ -2,6 +2,14 @@
 
 Read this reference when selecting `execution_profile` or when the first Graph compile fails because profile, evidence, or boundary fields are incomplete. These are contract fragments, not fixed plan templates; derive Nodes and partitions from the actual goal.
 
+## Contents
+
+- [Lightweight](#lightweight)
+- [Standard](#standard)
+- [Assurance](#assurance)
+- [Feature risk scan](#feature-risk-scan)
+- [Boundary dimension to observation](#boundary-dimension-to-observation)
+
 ## Lightweight
 
 Use only for low-risk work with no more than four non-validation Nodes:
@@ -80,6 +88,35 @@ Use for high-risk work or multiple trust boundaries:
 ```
 
 Create at least two independent Validator Nodes. Set one brief to `"validation_focus": "conformance"` and the other to `"validation_focus": "boundary"`.
+
+## Feature risk scan
+
+Scan each feature for separate failure mechanisms before writing Validator checks. For example, a report that accepts finite durations and computes a total needs both per-value validation and aggregate overflow coverage:
+
+```json
+{
+  "boundary_dimensions": [
+    {
+      "id": "duration-input-validity",
+      "category": "partition",
+      "subject": "individual duration values",
+      "partitions": ["zero", "positive-finite", "negative", "non-number", "non-finite"],
+      "minimum_cases": 5,
+      "sampling": "exhaustive-declared"
+    },
+    {
+      "id": "duration-aggregate-range",
+      "category": "overflow",
+      "subject": "sum of individually finite retained durations",
+      "partitions": ["ordinary-sum", "maximum-finite-sum", "overflowing-sum"],
+      "minimum_cases": 3,
+      "sampling": "boundary-pair"
+    }
+  ]
+}
+```
+
+Likewise, one `invalid-timestamp` partition does not cover valid early years, leap/calendar rules, finer-than-millisecond precision, offset-equivalent instants, adjacent ordering, or equal-instant ties. Declare separate dimensions when they fail for different reasons.
 
 ## Boundary dimension to observation
 

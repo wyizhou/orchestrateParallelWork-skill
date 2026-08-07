@@ -44,6 +44,15 @@ Do not limit independent validation to replaying implementer tests or checking o
 
 Every Validator `boundary_checks` entry references one of these dimensions through `<task_id>:<dimension_id>` and repeats the required partitions and minimum case count. The compiler rejects category mismatches, missing partitions, and weaker case counts. Use standalone `external:<dimension-id>` only when the Validator checks an authoritative external fact rather than an upstream Task.
 
+Before compiling, make a feature-by-feature risk scan. A broad dimension does not cover a different failure mechanism merely because both concern the same feature. In particular:
+
+- split timestamp calendar validity from represented precision, adjacent ordering, offsets, equality, and tie-breaking;
+- split per-value numeric validity from accumulation overflow, non-finite aggregate results, units, and rounding;
+- split happy-path interface equivalence from invalid inputs, partial writes, resource limits, and recovery;
+- split repeatability from ordering ties and idempotent repeated effects.
+
+If a feature performs aggregation, comparison, parsing, serialization, state transition, external I/O, or bounded resource use, declare every materially applicable category rather than choosing a single representative category.
+
 Consider these categories and include every materially applicable one:
 
 - valid, invalid, empty, missing, minimum, maximum, and just-outside input partitions;
